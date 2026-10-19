@@ -5,4 +5,4 @@ numpy>=2.0
 scipy>=1.13
 tzdata>=2024.1
 python-dotenv>=1.0
-pytest>=8.0
+pytest>=9.1.1
