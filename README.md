@@ -150,6 +150,14 @@ Bug reports and pull requests are welcome. [CONTRIBUTING.md](CONTRIBUTING.md) co
 what a change needs. Please report security problems privately, as described in
 [SECURITY.md](SECURITY.md), not in a public issue.
 
+## More free tools from Tape to Edge
+
+Same rules for each one: free, MIT, runs on your own machine, and the build is on the [YouTube channel](https://www.youtube.com/@tapetoedge).
+
+- [Edge Scanner](https://github.com/simonro/edge-scanner): a real-time intraday stock scanner with a browser dashboard you lay out yourself.
+- [Trading Journal AI](https://github.com/simonro/Trading-Journal-AI): a local-first journal. Import your broker CSV, get round-trip trades, KPIs and AI diary analysis.
+- [AI Research Desk](https://github.com/simonro/ai-research-desk): three AI research teams debate one stock into swing and long-term calls.
+
 ## Who made this
 
 I'm Simon, a trader who builds his own tools and films the process on Tape to Edge. This is the live
