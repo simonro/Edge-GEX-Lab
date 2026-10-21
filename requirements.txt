@@ -1,7 +1,7 @@
 fastapi>=0.143.3
 uvicorn>=0.54.0
 httpx>=0.28.1
-numpy>=2.0
+numpy>=2.5.4
 scipy>=1.13
 tzdata>=2024.1
 python-dotenv>=1.0
