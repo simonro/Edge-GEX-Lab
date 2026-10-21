@@ -27,6 +27,11 @@ demo data, not live market data.
 
 ![The live map for SPY on synthetic demo data: GEX by strike, the call wall, the put wall, the gamma flip and the trade guidance panel](docs/screenshot-live-map.png)
 
+[![Watch: I Built a Free Gamma Exposure (GEX) Map You Can Understand](docs/video-thumbnail.jpg)](https://youtu.be/okQVLf2s3GI)
+
+**[I Built a Free Gamma Exposure (GEX) Map You Can Understand](https://youtu.be/okQVLf2s3GI)**: what GEX
+is and how traders use it, then the tool itself on demo data.
+
 ## Privacy and your data
 
 Edge GEX Lab runs on your own computer. It needs no account, sends no telemetry, and the server
@@ -180,7 +185,6 @@ studies of whether the levels matter) stays private until it has enough sessions
 
 - YouTube: [@tapetoedge](https://www.youtube.com/@tapetoedge)
 - X: [@tapetoedge](https://x.com/tapetoedge)
-- Newsletter: [tape-to-edge.beehiiv.com](https://tape-to-edge.beehiiv.com)
 
 I take no affiliate money from any tool I show, and this project has no paid tier, no account and
 no telemetry. If it is useful, fork it.
