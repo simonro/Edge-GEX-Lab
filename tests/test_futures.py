@@ -163,29 +163,48 @@ def test_build_reports_raw_and_window_basis():
 
 @pytest.mark.parametrize("today, symbol", [
     (date(2026, 10, 21), "/ESZ26"),
-    (date(2026, 12, 9), "/ESZ26"),     # the day before the roll date
-    (date(2026, 12, 10), "/ESH27"),    # roll date (Thu, 8 days before Fri Dec 18): already the next quarter
+    (date(2026, 12, 10), "/ESZ26"),    # the old Thursday roll: still December
+    (date(2026, 12, 11), "/ESZ26"),    # the trading day before the roll date
+    (date(2026, 12, 14), "/ESH27"),    # roll date (Mon, 4 days before Fri Dec 18): already the next quarter
     (date(2026, 12, 18), "/ESH27"),    # expiry day
     (date(2026, 12, 21), "/ESH27"),
-    (date(2027, 3, 10), "/ESH27"),     # third Friday Mar 19 2027, roll Thu Mar 11
-    (date(2027, 3, 11), "/ESM27"),
+    (date(2027, 3, 14), "/ESH27"),     # third Friday Mar 19 2027, roll Mon Mar 15
+    (date(2027, 3, 15), "/ESM27"),
     (date(2027, 9, 8), "/ESU27"),
 ])
 def test_front_contract_and_roll(today, symbol):
     c = F.front_contract("SPX", today)
     assert c.symbol == symbol
-    assert c.roll_date.weekday() == 3 and (c.expiry - c.roll_date).days == 8 and c.expiry.weekday() == 4
+    assert c.roll_date.weekday() == 0 and (c.expiry - c.roll_date).days == 4 and c.expiry.weekday() == 4
     assert today < c.roll_date
 
 
 def test_roll_dates_and_ndx_symbols():
     z = F.front_contract("SPX", date(2026, 10, 21))
-    assert (z.expiry, z.roll_date) == (date(2026, 12, 18), date(2026, 12, 10))
+    assert (z.expiry, z.roll_date) == (date(2026, 12, 18), date(2026, 12, 14))
     n = F.front_contract("NDX", date(2026, 10, 21))
     assert n.symbol == "/MNQZ26" and n.also == ("/NQZ26",)
     assert F.next_contract(z).symbol == "/ESH27" and F.next_contract(F.contract_for("SPX", 2027, 12)).symbol == "/ESH28"
     j = z.to_json()
-    assert j["code"] == "Z26" and j["label"] == "Dec 2026" and j["roll_date"] == "2026-12-10"
+    assert j["code"] == "Z26" and j["label"] == "Dec 2026" and j["roll_date"] == "2026-12-14"
+
+
+# CME's customary U.S. equity index roll dates, copied from cmegroup.com/trading/equity-index/rolldates.html
+# (read 2026-10-25). Jun 2026: Juneteenth moves the expiry to Thu Jun 18, the roll stays Mon Jun 15.
+CME_ROLL_DATES = [
+    (2025, 3, date(2025, 3, 17)), (2025, 6, date(2025, 6, 16)), (2025, 9, date(2025, 9, 15)),
+    (2025, 12, date(2025, 12, 15)), (2026, 3, date(2026, 3, 16)), (2026, 6, date(2026, 6, 15)),
+    (2026, 9, date(2026, 9, 14)), (2026, 12, date(2026, 12, 14)), (2027, 3, date(2027, 3, 15)),
+    (2027, 6, date(2027, 6, 14)), (2027, 9, date(2027, 9, 13)), (2027, 12, date(2027, 12, 13)),
+    (2028, 3, date(2028, 3, 13)), (2028, 6, date(2028, 6, 12)), (2028, 9, date(2028, 9, 11)),
+    (2028, 12, date(2028, 12, 11)),
+]
+
+
+@pytest.mark.parametrize("year, month, cme_roll", CME_ROLL_DATES)
+def test_roll_date_matches_cme_table(year, month, cme_roll):
+    assert F.contract_for("SPX", year, month).roll_date == cme_roll
+    assert F.contract_for("NDX", year, month).roll_date == cme_roll
 
 
 def test_holiday_friday_uses_thursday_am_options():

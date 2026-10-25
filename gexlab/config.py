@@ -235,9 +235,10 @@ FUTURES = {                      # Index -> the futures it settles: /ES and /MES
 }
 ETF_INDEX = {"SPY": "SPX", "QQQ": "NDX"}  # ETF levels convert to index points by the index/ETF price ratio first.
 FUTURES_MONTHS = {3: "H", 6: "M", 9: "U", 12: "Z"}  # Quarterly cycle and the exchange month codes.
-FUTURES_ROLL_DAYS = 8            # Roll rule: the front contract switches to the next quarter ON the roll date, the
-                                 # Thursday 8 calendar days before the third Friday (the second Thursday before expiry,
-                                 # when volume moves to the next contract). No holiday adjustment to the roll date.
+FUTURES_ROLL_DAYS = 4            # Roll rule: the front contract switches to the next quarter ON the roll date, CME's
+                                 # customary U.S. equity index roll: the Monday before the third Friday, 4 calendar days
+                                 # earlier (cmegroup.com/trading/equity-index/rolldates.html, read 2026-10-25). Counted
+                                 # from the third Friday, so a holiday that moves the expiry to Thursday does not move it.
 FUTURES_RATE = 0.0418            # r in the parity forward F = K + e^(rT) (C - P): the 13 week Treasury bill, coupon
                                  # equivalent, 4.18% on 2026-10-20 (home.treasury.gov, Daily Treasury Bill Rates).
                                  # Strikes are picked nearest the forward, where C - P is near 0, so r barely matters:

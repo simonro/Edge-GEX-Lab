@@ -185,8 +185,8 @@ display change only: the GEX math stays in index or ETF units, and the panel lab
 estimate, not a futures quote.
 
 - **Which contract.** SPX maps to /ES (and /MES), NDX to /MNQ (and /NQ). The view uses the front
-  quarterly contract (Mar, Jun, Sep, Dec) and moves to the next one on the roll date, the Thursday 8
-  calendar days before the third Friday.
+  quarterly contract (Mar, Jun, Sep, Dec) and moves to the next one on CME's customary roll date, the
+  Monday before the third Friday.
 - **Where the basis comes from.** Put-call parity on the AM settled index options that expire with the
   futures: forward = strike + e^(rT) x (call mid minus put mid), taken as the median over the strikes
   nearest the forward. The basis is that forward minus the index value from the same Cboe payload, so

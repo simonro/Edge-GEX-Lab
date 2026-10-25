@@ -8,8 +8,8 @@ Basis, from put-call parity on the option chain the map already pulls from Cboe 
 - /ES and /MES settle to the SPX special opening quotation on the quarterly expiry (third Friday of Mar, Jun, Sep,
   Dec), the same settlement as the AM settled monthly SPX options (root SPX, not SPXW). /NQ and /MNQ settle to the
   NDX one, like the AM settled monthly NDX options. So the forward of those options IS the futures fair value.
-- Front contract: the nearest quarterly whose roll date is still ahead. The roll date is the Thursday
-  FUTURES_ROLL_DAYS (8) calendar days before the third Friday; ON that date the view moves to the next quarter.
+- Front contract: the nearest quarterly whose roll date is still ahead. The roll date is CME's customary one, the
+  Monday FUTURES_ROLL_DAYS (4) calendar days before the third Friday; ON that date the view moves to the next quarter.
 - F_K = K + e^(rT) * (C_mid - P_mid) at each strike with usable call and put mids (alpaca.mid_usable, the map's own
   check). Pass 1 takes the strikes nearest spot, pass 2 the FUTURES_PARITY_STRIKES nearest that first forward, where
   C - P is near zero and r barely matters. F = median of pass 2. Fewer than FUTURES_PARITY_MIN usable pairs:
