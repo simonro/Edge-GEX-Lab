@@ -12,7 +12,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 
 # ---------------------------------------------------------------- identity
-APP_VERSION = "1.1.1"            # The public release this build is. Bump it before tagging a release: the update check
+APP_VERSION = "1.1.2"            # The public release this build is. Bump it before tagging a release: the update check
                                  # (gexlab/update_check.py) compares it with GitHub's latest release tag.
 UPDATE_REPO = "simonro/Edge-GEX-Lab"  # Where the update check looks for releases (the public repo).
 UPDATE_EVERY_H = 24              # At most one update check a day; the answer is cached in CACHE_DIR.
