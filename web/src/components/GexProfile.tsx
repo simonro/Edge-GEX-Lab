@@ -1,6 +1,6 @@
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 import type { GexMap, StrikeRow } from "../api/types";
-import { distText, gex, int, px, price as fmtPrice, strike as fmtStrike } from "../lib/format";
+import { distText, gex, int, px, price as fmtPrice, spotRef, strike as fmtStrike } from "../lib/format";
 import { futPx, toFut, type FutConv } from "../lib/futures";
 import { useMeasure } from "../lib/hooks";
 
@@ -458,7 +458,7 @@ export default function GexProfile({ map, levels, rangePct, showCurve, frozen, h
         >
           <div className="t">
             Strike {fmtStrike(hv.strike)}
-            <span>{distText(hv.strike, spot, map.ticker)}</span>
+            <span>{distText(hv.strike, spot, map.ticker, spotRef(map.spot.basis))}</span>
           </div>
           <div className="row">
             <span>Call GEX</span>
@@ -491,7 +491,7 @@ export default function GexProfile({ map, levels, rangePct, showCurve, frozen, h
         >
           <div className="t">
             If price were {fmtPrice(ch.spot)}
-            <span>{distText(ch.spot, spot, map.ticker)}</span>
+            <span>{distText(ch.spot, spot, map.ticker, spotRef(map.spot.basis))}</span>
           </div>
           <div className="row">
             <span>Net GEX, recalculated</span>

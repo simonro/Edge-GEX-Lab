@@ -87,6 +87,9 @@ caches or screenshots with your account details.
   usable open interest and IV, and how many contracts were left out and why.
 - **Futures view**: the same levels as /ES or /MNQ equivalents for SPX, NDX, SPY and QQQ, with the
   basis estimated from the option chain. See [Futures view](#futures-view).
+- **Vol drift and DEX**: whether at-the-money implied volatility is rising or falling since the session
+  began, and the size of call and put delta exposure from open interest. Context only, labeled
+  untested. See [Vol drift and DEX](#vol-drift-and-dex).
 - **Present mode** (key P): a larger layout for screen recording.
 
 ## Screenshots
@@ -173,6 +176,11 @@ Privacy above), linking to its release notes.
 - **Feeds.** Alpaca OPRA (paid) gives live quotes and the IV is solved from the mid; Alpaca's free
   indicative feed gives a modified quote with its own IV. SPX and NDX come from Cboe, about 15 minutes
   delayed. The map labels which one you are looking at.
+- **SPX and NDX before about 09:45 ET.** Cboe's delayed file still carries the prior session's index
+  close until its first live value arrives. The map labels spot "prior close" with Cboe's own time, the
+  gamma sign and distances say they are measured at that close, guidance shows no setups, and the
+  Futures view waits for live data before estimating a basis. The walls and the gamma flip come from
+  open interest by strike, so they still show.
 - **Valuation clock.** Time to expiry is measured from the quote time, and from the session close when
   the market is shut, so a weekend map is not distorted.
 
@@ -202,6 +210,27 @@ estimate, not a futures quote.
   for SPX and NDX.
 
 Works in demo mode on synthetic data, labeled as such. Not financial advice.
+
+## Vol drift and DEX
+
+Two context readings on the Live Map. Neither changes the GEX math, the levels or the guidance, and
+neither is tested: both carry an **Untested** chip.
+
+- **Vol drift** answers one question: is at-the-money implied volatility rising or falling today? It
+  reads the ATM IV of one expiry (the IVs of the two strikes around spot, interpolated to spot) and
+  compares it with the session's first reading after the open. The expiry is the nearest one with at
+  least 3 full trading days left, fixed for the whole session and never 0DTE, so the reference and the
+  current value measure the same contracts. The change counts as flat while it is smaller than
+  max(0.5 vol points, 5% of the reference IV); beyond that it reads rising or falling. The card pairs it
+  with the gamma regime as the conditions where moves tend to get bigger (rising IV in negative gamma)
+  or stay smaller (falling IV in positive gamma). A ticker that lists only Friday expiries can read
+  unavailable late in the week, when no expiry in the 7 day window has 3 full sessions left.
+- **DEX** is delta exposure: delta x open interest x 100 x spot, summed per side. Net DEX is call delta
+  exposure minus put delta exposure, so it reads positive when calls are larger and negative when puts
+  are, with each side's size shown unsigned. Open interest is the previous session's, so DEX sizes
+  yesterday's positioning at today's price and IV. It is not a live flow scoreboard.
+
+Not financial advice.
 
 ## Contributing
 

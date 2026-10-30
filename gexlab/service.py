@@ -11,7 +11,9 @@ from pathlib import Path
 import logging
 
 from gexlab import config, magnitude, store
+from gexlab.engine import dex as DX
 from gexlab.engine import gex as G
+from gexlab.engine import voldrift as VD
 from gexlab.engine.calendar import (NY, UTC, TradingCalendar, expiry_kind, iso_z, ny_today,
                                     settlement_dt, utc_now, valuation_label)
 from gexlab.models import Chain, Contract, Spot
@@ -202,11 +204,12 @@ def fmt_date_short(iso: str | None) -> str | None:
     return f"{d.strftime('%b')} {d.day}"
 
 
-def lead_sentence(ticker: str, spot: float, lv: G.Levels, coverage_pct: float) -> str:
+def lead_sentence(ticker: str, spot: float, lv: G.Levels, coverage_pct: float, prior_close: bool = False) -> str:
     """Plain-English, data-derived, descriptive only (no signal words). One line at 1920 px:
     the coverage rule detail lives in the coverage panel and the method drawer, not here.
     Vocabulary: always "gamma flip", never "flip" alone or "zero gamma"."""
-    s = f"{ticker} at {fmt_spot(spot, ticker)}"
+    s = (f"{ticker} at its prior close ({fmt_spot(spot, ticker)})" if prior_close
+         else f"{ticker} at {fmt_spot(spot, ticker)}")
     parts = []
     if lv.nearest_zero_gamma is not None:
         rel = "above" if spot > lv.nearest_zero_gamma else "below" if spot < lv.nearest_zero_gamma else "at"
@@ -222,6 +225,8 @@ def lead_sentence(ticker: str, spot: float, lv: G.Levels, coverage_pct: float) -
         band = int(round(config.SWEEP_BAND * 100))
         body += (f" Net gamma stays {lv.regime if lv.regime != 'neutral' else 'near zero'} "
                  f"with no gamma flip within {band}% of spot.")
+    if prior_close:
+        body += f" Cboe's first live {ticker} value arrives about 09:45 ET."
     band = int(round(config.COVERAGE_STRIKE_BAND * 100))
     return f"{body} Built from {coverage_pct:.1f}% of the chain within {band}% of spot."
 
@@ -401,6 +406,8 @@ def build_map(ticker: str, expiries: list[str] | None, signed: bool) -> dict:
         "totals": {"call_gex": call_tot, "put_gex": put_tot_out,
                    "net_gex": call_tot + put_tot_out},
         "magnitude": _magnitude(ticker, chain, call_tot, put_tot, spot, cal, now),
+        "dex": _dex(sel, spot, chain, quotes["usable"]),
+        "vol_drift": _vol_drift(ticker, chain, cal, now, market_open, lv.regime if quotes["usable"] else None),
         "quotes": quotes,
         "levels": {"call_wall": lv.call_wall, "put_wall": lv.put_wall,
                    "zero_gamma": lv.zero_gamma, "nearest_zero_gamma": lv.nearest_zero_gamma,
@@ -413,7 +420,7 @@ def build_map(ticker: str, expiries: list[str] | None, signed: bool) -> dict:
              "oi_source": chain.oi_source, "expiries": sorted({c.expiry.isoformat() for c in chain.contracts}),
              "excluded": None}
             if config.is_demo() else frozen_today(ticker, ny_today(now))),
-        "lead": (lead_sentence(ticker, spot, lv, pct) if quotes["usable"] else
+        "lead": (lead_sentence(ticker, spot, lv, pct, chain.spot.basis == "prior_close") if quotes["usable"] else
                  no_quotes_lead(ticker, spot, quotes, cov, kind, None if config.is_demo() else cal, now, market_open)),
         "warnings": warnings,
     }
@@ -441,6 +448,228 @@ def _magnitude(ticker: str, chain: Chain, call_gex: float, put_gex: float, spot:
                                cal=cal, now=now, call_gex=call_gex, put_gex=put_gex)
     except Exception as ex:  # noqa: BLE001
         log.warning("magnitude unavailable for %s: %s", ticker, ex)
+        return None
+
+
+# ---------------------------------------------------------------- context metrics (display only)
+
+DEX_CAVEAT = ("Built from the previous session's open interest, so it sizes yesterday's positioning at today's price "
+              "and IV. It is not a live flow scoreboard.")
+DEX_METHOD = ("DEX per contract = delta x OI x 100 x spot, in dollars of the underlying. Delta is Black-Scholes with "
+              "r = q = 0, the same IV and valuation clock as GEX. A call's delta is positive and a put's negative, so net "
+              "DEX is call delta exposure minus put delta exposure: positive when call delta exposure exceeds put delta "
+              "exposure, negative when put delta exposure exceeds call delta exposure. Delta weighted, so it is not "
+              "a count of open interest. Each side is also shown without a sign. Valid contracts of the selected "
+              "expiries only, as in GEX.")
+
+
+def _dex(sel: list[Contract], spot: float, chain: Chain, usable: bool) -> dict | None:
+    """Delta exposure of the selected expiries. Never takes the map down: a failure leaves `dex` null."""
+    try:
+        d = DX.compute(sel, spot)
+    except Exception as ex:  # noqa: BLE001
+        log.warning("dex unavailable for %s: %s", chain.ticker, ex)
+        return None
+    ok = usable and d.contracts > 0
+    return {"available": ok, "reason": None if ok else "No usable contracts in the selected expiries.",
+            "net_usd": d.net if ok else None,
+            "call_usd": d.call_abs if ok else None, "put_usd": d.put_abs if ok else None,
+            "contracts": d.contracts, "oi_date": chain.oi_date, "caveat": DEX_CAVEAT, "method": DEX_METHOD}
+
+
+VOL_METHOD = ("At-the-money implied volatility of one expiry: the IVs of the two strikes that bracket spot, "
+              "interpolated linearly to spot. A strike's IV is the average of its call and put when both have a "
+              "usable IV of their own, else the one that does. The expiry is the nearest one with at least three full "
+              "trading days left, fixed for the session, never 0DTE: late in the day 0DTE IV is distorted, a few hours of "
+              "variance annualized over a sliver of time. Both strikes must lie within 5% of spot with at least 4 usable IVs "
+              "there, or the value is unavailable, never a guess.")
+VOL_REF_METHOD = ("Reference: the first measurement of the session. When this install records 15-minute snapshots, "
+                  "the first usable one of the session (about 09:45 ET); otherwise the first value this app computed "
+                  "after the session opened, labeled with its time.")
+VOL_CLOCK_NOTE = ("The expiry is fixed for the whole session, so the reference and the current value measure the same "
+                  "contracts. Time to expiry is calendar time, so part of any change is the clock itself: as the session "
+                  "runs, more of the time left is overnight, when prices usually move less. With at least three full "
+                  "sessions to expiry one session's clock is a smaller share of the time left, so that effect is "
+                  "smaller than on a next day expiry; it is not removed.")
+VOL_CHIP = "Untested: no study tests this pairing"
+_REASONS = {
+    "no_contracts": "the {exp} expiry is not in the chain",
+    "too_few_quotes": "the {exp} expiry has too few usable quotes within 5% of spot",
+    "no_bracket": "the {exp} expiry has no usable strike on one side of spot within 5%",
+}
+
+_VOL_FIRST: dict[tuple, dict] = {}          # (ticker, session, expiry, settlement) -> first app reading that session
+_VOL_REC: dict[tuple, dict] = {}            # same key -> recorder reference once found (captures never change)
+_VOL_PIN: dict[tuple, tuple] = {}           # (ticker, session) -> (expiry, settlement): fixed once chosen
+_VOL_LOCK = threading.Lock()
+
+
+def _day_text(d: date) -> str:
+    return f"{d.strftime('%a')} {d.strftime('%b')} {d.day}"
+
+
+def recorder_vol_reference(ticker: str, day: date, expiry: date, settlement: str,
+                           path: Path | str | None = None) -> dict | None:
+    """ATM IV of the first stored capture of the session (snapshot or 10:00 frozen, status not invalid) that
+    yields one on this expiry. Read only."""
+    key = (ticker, day.isoformat(), expiry.isoformat(), settlement)
+    with _VOL_LOCK:
+        if key in _VOL_REC:
+            return _VOL_REC[key]
+    with store.session(path) as conn:
+        caps = conn.execute("SELECT id, kind, completed_at, spot, spot_ts, source_ts FROM captures WHERE ticker=? "
+                            "AND session_date=? AND status!='invalid' AND spot IS NOT NULL AND completed_at IS NOT NULL "
+                            "ORDER BY completed_at, id", (ticker, day.isoformat())).fetchall()
+        for cap in caps:
+            rows = conn.execute("SELECT strike, type, iv, iv_shared, iv_own FROM capture_contracts WHERE capture_id=? "
+                                "AND expiry=? AND settlement=?", (cap["id"], expiry.isoformat(), settlement)).fetchall()
+            cs = [Contract(symbol="", root="", expiry=expiry, settlement=settlement, strike=float(r[0]), type=r[1],
+                           iv=r[2], iv_shared=bool(r[3]), iv_own=r[4]) for r in rows]
+            res, _ = VD.atm_iv(cs, float(cap["spot"]), expiry, settlement)
+            if res is not None:
+                out = {"iv": res.iv, "ts": cap["completed_at"], "data_ts": cap["source_ts"] or cap["spot_ts"],
+                       "source": "recorder", "kind": cap["kind"]}
+                with _VOL_LOCK:
+                    for k in [k for k in _VOL_REC if k[1] != key[1]]:
+                        del _VOL_REC[k]                 # keep one session in memory
+                    _VOL_REC[key] = out
+                return out
+    return None
+
+
+def demo_vol_reference(ticker: str, expiry: date, settlement: str) -> dict | None:
+    """The synthetic 09:45 reference for demo mode (fixtures), only for the expiry the demo chain targets."""
+    try:
+        j = json.loads(config.VOL_DRIFT_DEMO_REF.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    r = (j.get("tickers") or {}).get(ticker)
+    if not r or r.get("expiry") != expiry.isoformat() or r.get("settlement") != settlement:
+        return None
+    return {"iv": float(r["iv"]), "ts": r["ts"], "data_ts": r["ts"], "source": "demo", "kind": "snapshot"}
+
+
+def _remember_first(key: tuple, iv: float, at: datetime, data_ts: datetime) -> dict:
+    with _VOL_LOCK:
+        if key not in _VOL_FIRST:
+            for k in [k for k in _VOL_FIRST if k[1] != key[1]]:
+                del _VOL_FIRST[k]                       # keep one session in memory
+            _VOL_FIRST[key] = {"iv": iv, "ts": iso_z(at), "data_ts": iso_z(data_ts), "source": "app", "kind": None}
+        return _VOL_FIRST[key]
+
+
+def _pinned_expiry(ticker: str, day: date, contracts: list[Contract], cal: TradingCalendar) -> tuple | None:
+    """The session's expiry, chosen once per ticker and session, so the reference and every later reading measure
+    the same contracts. A later chain that lacks it reads unavailable; another expiry is never substituted."""
+    k = (ticker, day.isoformat())
+    with _VOL_LOCK:
+        if k in _VOL_PIN:
+            return _VOL_PIN[k]
+    tgt = VD.target_expiry(contracts, day, cal)
+    if tgt is not None:
+        with _VOL_LOCK:
+            for x in [x for x in _VOL_PIN if x[1] != k[1]]:
+                del _VOL_PIN[x]
+            tgt = _VOL_PIN.setdefault(k, tgt)
+    return tgt
+
+
+def _parse_z(s: str | None) -> datetime | None:
+    try:
+        return datetime.fromisoformat(s.replace("Z", "+00:00")) if s else None
+    except ValueError:
+        return None
+
+
+def vol_drift(ticker: str, chain: Chain, cal: TradingCalendar, now: datetime, market_open: bool,
+              regime: str | None, *, db_path: Path | str | None = None) -> dict:
+    """GET /api/map `vol_drift`. Display only: reads the chain and, read only, the stored captures."""
+    spot = chain.spot.price
+    day = VD.session_day(cal, chain.valuation)
+    out = {"available": False, "reason": None, "expiry": None, "settlement": None, "session": day.isoformat(),
+           "current": None, "reference": None, "reference_reason": None, "change_pts": None, "label": None,
+           "threshold_pts": None, "flat_min_pts": config.VOL_DRIFT_FLAT_MIN_PTS,
+           "flat_rel": config.VOL_DRIFT_FLAT_REL, "regime": regime, "pairing": None, "tested": False,
+           "chip": VOL_CHIP, "method": VOL_METHOD, "reference_method": VOL_REF_METHOD, "clock_note": VOL_CLOCK_NOTE}
+    if not config.is_demo() and not cal.exchange:
+        out["reason"] = ("Unavailable: the exchange calendar is unavailable, so the full trading days to expiry "
+                         "cannot be confirmed.")
+        return out
+    if chain.spot.basis == "prior_close":
+        # Cboe's file before about 09:45 ET: yesterday's index over pre-open quotes. Never a reading, never a reference.
+        out["reason"] = (f"Unavailable until Cboe's first live {ticker} value, about 09:45 ET: the payload still "
+                         "carries the prior close.")
+        return out
+    tgt = _pinned_expiry(ticker, day, chain.contracts, cal)
+    if tgt is None:
+        out["reason"] = (f"Unavailable: no listed expiry in the 0 to 7 day window has {config.VOL_DRIFT_MIN_FULL_SESSIONS} "
+                         "full trading days left.")
+        return out
+    expiry, st = tgt
+    out.update(expiry=expiry.isoformat(), settlement=st)
+    # Off hours the vendor's indicative IV is computed on its own wall clock, not the close it is valued at.
+    excl = ("indicative",) if not market_open and not config.is_demo() else ()
+    res, why = VD.atm_iv(chain.contracts, spot, expiry, st, exclude_sources=excl)
+    if res is None:
+        out["reason"] = "Unavailable: " + _REASONS.get(why, "the {exp} expiry has no usable ATM IV").format(
+            exp=_day_text(expiry)) + "."
+        return out
+    out["available"] = True
+    out["current"] = {"iv_pct": round(res.iv * 100, 2), "ts": iso_z(chain.valuation), "spot": spot,
+                      "k_lo": res.k_lo, "k_hi": res.k_hi, "iv_lo_pct": round(res.iv_lo * 100, 2),
+                      "iv_hi_pct": round(res.iv_hi * 100, 2), "usable": res.usable}
+
+    key = (ticker, day.isoformat(), expiry.isoformat(), st)
+    ref = None
+    if config.is_demo():
+        ref = demo_vol_reference(ticker, expiry, st)
+    else:
+        try:
+            ref = recorder_vol_reference(ticker, day, expiry, st, db_path)
+        except Exception as ex:  # noqa: BLE001
+            log.warning("stored vol reference unavailable for %s: %s", ticker, ex)
+        sess = cal.sessions.get(day)
+        opened = datetime.combine(day, sess.open, NY) if sess is not None else None
+        # Only a reading whose ATM inputs carry a known quote time at or after the open can anchor the session.
+        times = [c.iv_ts for c in res.inputs]
+        known = (opened is not None and times and all(t is not None for t in times)
+                 and (chain.feed != "cboe_delayed" or chain.source_ts is not None))
+        if market_open and day == ny_today(now) and known and min(times) >= opened and chain.valuation >= opened:
+            first = _remember_first(key, res.iv, chain.valuation, max(times))
+        else:
+            with _VOL_LOCK:
+                first = _VOL_FIRST.get(key)
+        ref = ref or first
+    if ref is None:
+        out["reference_reason"] = (f"No reading from the {_day_text(day)} session yet: the reference is the first "
+                                   "value measured after the session opened.")
+        return out
+    out["reference"] = {"iv_pct": round(ref["iv"] * 100, 2), "ts": ref["ts"], "data_ts": ref["data_ts"],
+                        "source": ref["source"], "kind": ref["kind"]}
+    # The reference's earliest clock (its market-data time or its valuation / completion time): a quote stamped a
+    # second after the fetch started must not make the very reading it came from look older than itself.
+    ref_ts = [t for t in (_parse_z(ref["data_ts"]), _parse_z(ref["ts"])) if t is not None]
+    ref_at = min(ref_ts) if ref_ts else None
+    if ref_at is not None and (ref_at - chain.valuation).total_seconds() > config.CLOCK_SKEW_S:
+        out["reference_reason"] = ("The current chain is older than the reference, so no change is shown until "
+                                   "the next refresh.")
+        return out
+    chg = (res.iv - ref["iv"]) * 100
+    band = VD.flat_band(ref["iv"] * 100)                    # the label reads the unrounded band
+    out["threshold_pts"] = round(band, 2)                    # rounded for display only
+    out["change_pts"] = round(chg, 1)
+    out["label"] = VD.change_label(chg, band)
+    out["pairing"] = VD.pairing(regime, out["label"])
+    return out
+
+
+def _vol_drift(ticker: str, chain: Chain, cal: TradingCalendar, now: datetime, market_open: bool,
+               regime: str | None) -> dict | None:
+    """Never takes the map down: any failure here leaves `vol_drift` null."""
+    try:
+        return vol_drift(ticker, chain, cal, now, market_open, regime)
+    except Exception as ex:  # noqa: BLE001
+        log.warning("vol drift unavailable for %s: %s", ticker, ex)
         return None
 
 

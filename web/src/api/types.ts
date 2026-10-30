@@ -157,6 +157,47 @@ export interface Magnitude {
   index_note?: string;
 }
 
+/** Vol Drift: ATM IV of the nearest expiry with three full trading days left, against the session's first reading.
+ *  Contract section "Vol Drift and DEX". Display only. */
+export interface VolDrift {
+  available: boolean;
+  reason: string | null;
+  expiry: string | null;
+  settlement: "AM" | "PM" | null;
+  session: string;
+  current: { iv_pct: number; ts: string; spot: number; k_lo: number; k_hi: number; iv_lo_pct: number; iv_hi_pct: number; usable: number } | null;
+  /** source: recorder (first stored capture of the session), app (first value this app computed), demo (fixture). */
+  reference: { iv_pct: number; ts: string; data_ts: string | null; source: "recorder" | "app" | "demo"; kind: "snapshot" | "frozen" | null } | null;
+  reference_reason: string | null;
+  /** current minus reference, vol points, rounded to 0.1: the number the label reads */
+  change_pts: number | null;
+  label: "rising" | "falling" | "flat" | null;
+  /** half width of the flat band, vol points: max(flat_min_pts, flat_rel x reference IV); null without a reference */
+  threshold_pts: number | null;
+  flat_min_pts: number;
+  flat_rel: number;
+  regime: "positive" | "negative" | "neutral" | null;
+  pairing: string | null;
+  tested: boolean;
+  chip: string;
+  method: string;
+  reference_method: string;
+  clock_note: string;
+}
+
+/** DEX: delta * OI * 100 * spot over the selected expiries. net = calls minus puts (put delta is negative), plus unsigned sides. */
+export interface Dex {
+  available: boolean;
+  reason: string | null;
+  net_usd: number | null;
+  call_usd: number | null;
+  put_usd: number | null;
+  contracts: number;
+  oi_date: string | null;
+  caveat: string;
+  method: string;
+}
+
 export interface OiSource {
   kind: "cboe" | "alpaca" | null;
   label: string | null;
@@ -176,8 +217,9 @@ export interface GexMap {
   ticker: string;
   as_of: string;
   model_version: string;
-  /** basis: last_trade (in session), regular_close (market closed: official session close), payload (Cboe). */
-  spot: { price: number; ts: string; source: string; basis?: "last_trade" | "regular_close" | "payload" };
+  /** basis: last_trade (in session), regular_close (market closed: official session close), payload (Cboe),
+   *  prior_close (Cboe with the market open but the index value from before today's open; ts is the index's own time). */
+  spot: { price: number; ts: string; source: string; basis?: "last_trade" | "regular_close" | "payload" | "prior_close" };
   /** The one clock T is measured from. label is set only when the market is closed. */
   valuation?: { ts: string; basis: "quote_time" | "session_close"; label: string | null };
   feed: { kind: FeedKind; label: string; stale: boolean; market_open: boolean; last_success: string | null; data_ts?: string | null };
@@ -203,6 +245,9 @@ export interface GexMap {
   totals: { call_gex: number; put_gex: number; net_gex: number };
   /** null when the reference could not be built; absent from older payloads. */
   magnitude?: Magnitude | null;
+  /** null only when the block could not be built; absent from older payloads. */
+  vol_drift?: VolDrift | null;
+  dex?: Dex | null;
   /** usable false: no valid contract within 10% of spot, so the levels are unavailable, not neutral or zero.
    *  reason "no_live_quotes": no bid, ask or IV anywhere in the selection (Cboe's first minutes after the open). */
   quotes?: { usable: boolean; reason: "no_live_quotes" | "no_usable_contracts" | null; live: number };
@@ -317,6 +362,7 @@ export interface ReplaySnapshot {
   status?: CaptureStatus;
   status_reason?: string | null;
   spot_ts?: string | null;
+  index_ts?: string | null;   // SPX/NDX: the index value's own time (Cboe last_trade_time)
   used?: boolean;
 }
 
@@ -500,6 +546,8 @@ export interface FuturesContract {
 export interface FuturesParity {
   available: boolean;
   reason: string | null;
+  /** True while Cboe's index value is the prior close (before about 09:45 ET): no basis is computed. */
+  prior_close?: boolean;
   forward: number | null;
   index_spot: number;
   /** median of basis_raw over the payloads of the last few minutes (basis_window) */

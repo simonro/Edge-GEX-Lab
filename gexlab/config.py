@@ -12,7 +12,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 
 # ---------------------------------------------------------------- identity
-APP_VERSION = "1.1.2"            # The public release this build is. Bump it before tagging a release: the update check
+APP_VERSION = "1.2.0"            # The public release this build is. Bump it before tagging a release: the update check
                                  # (gexlab/update_check.py) compares it with GitHub's latest release tag.
 UPDATE_REPO = "simonro/Edge-GEX-Lab"  # Where the update check looks for releases (the public repo).
 UPDATE_EVERY_H = 24              # At most one update check a day; the answer is cached in CACHE_DIR.
@@ -213,8 +213,27 @@ ATR_ADJUSTMENT = "split"         # A split inside the window would read as a hug
 ATR_FROM_ETF = {"SPX": "SPY", "NDX": "QQQ"}  # Alpaca has no index bars. ATR% is a percentage, so the ETF's ATR% is a
                                  # fair stand in for the index's (no units problem, unlike dollar volume). Labeled.
 
+# ---------------------------------------------------------------- context metrics (display only)
+# Vol Drift and DEX sit beside the levels on the Live Map. Neither touches the GEX math, the levels, the gate, the
+# recorder captures or the studies.
+VOL_DRIFT_MIN_FULL_SESSIONS = 3  # The expiry measured is the nearest one that settles at or after the close of the
+                                 # third session after the current one: at least three full trading days left
+                                 # (decided 2026-10-28). 0DTE IV is distorted late in the day, and on a 1-day expiry the clock
+                                 # itself (calendar T, quiet overnight hours) moves IV through the session; three
+                                 # sessions dilute that. Friday-only stocks have no such expiry inside the 0 to 7 day
+                                 # window on Wednesdays and Thursdays: unavailable then.
+VOL_DRIFT_BAND = 0.05            # Both strikes bracketing spot must lie within 5% of spot, and the quotes counted toward
+                                 # VOL_DRIFT_MIN_USABLE are those inside the same band.
+VOL_DRIFT_MIN_USABLE = 4         # Fewer usable IVs (calls plus puts) inside the band on that expiry: unavailable, never
+                                 # a guess. Four is two strikes with both sides, the least that brackets spot.
+VOL_DRIFT_FLAT_MIN_PTS = 0.5     # Flat band, relative to the IV level (decided 2026-10-28): flat while the change, as
+VOL_DRIFT_FLAT_REL = 0.05        # displayed (0.1 vol point), is below max(0.5 vol point, 5% of the reference IV);
+                                 # rising or falling at or beyond it. SPY at 19% IV: 0.95 point; NVDA at 42%: 2.1
+                                 # points. Round starting values, not tuned on any outcome.
+VOL_DRIFT_DEMO_REF = FIXTURES_DIR / "vol_ref.json"   # Synthetic 09:45 references for demo mode.
+
 # ---------------------------------------------------------------- trade guidance
-GUIDANCE_MAX_DATA_AGE_S = 300    # Market open: no setups when the vendor's data time (spot trade, or the Cboe payload) is
+GUIDANCE_MAX_DATA_AGE_S = 300   # Market open: no setups when the vendor's data time (spot trade, or the Cboe payload) is
                                  # more than 5 min old, even if the last fetch "succeeded" (day-1 verification).
 GUIDANCE_MIN_RR = 1.0            # A scenario is shown only when the reward from the entry zone's worst edge to target 1
                                  # is at least the risk from that edge to the stop. Below 1 to 1 the

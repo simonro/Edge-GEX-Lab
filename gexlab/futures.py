@@ -37,9 +37,11 @@ from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 
 from gexlab import config
-from gexlab.engine.calendar import NY, UTC, TradingCalendar, iso_z, ny_today, third_friday, time_to_expiry, valuation_time
+from gexlab.engine.calendar import (NY, UTC, TradingCalendar, iso_z, ny_today, predates_session, third_friday,
+                                    time_to_expiry, valuation_time)
 from gexlab.models import parse_occ
 from gexlab.sources.base import SourceError
+from gexlab.sources.cboe import parse_index_time
 
 ESTIMATE_LABEL = "Estimate: futures equivalents from the option chain, not a futures quote"
 
@@ -148,15 +150,6 @@ def parity_forward(pairs: dict[float, dict], spot: float, T: float, r: float | N
 
 # ---------------------------------------------------------------- the Cboe payload
 
-def parse_index_time(s: str | None) -> datetime | None:
-    """Cboe's `last_trade_time` ("2026-10-21T11:44:31") is New York wall time with no zone (checked 2026-10-21:
-    payload timestamp 15:59:33Z = 11:59:33 ET, last_trade_time 11:44:31, the 15 minute delay)."""
-    if not s:
-        return None
-    try:
-        return datetime.fromisoformat(s.strip()[:19]).replace(tzinfo=NY).astimezone(UTC)
-    except ValueError:
-        return None
 
 
 @dataclass
@@ -228,7 +221,8 @@ def option_expiry(c: FuturesContract, p: IndexPayload) -> date | None:
 
 def parity_block(c: FuturesContract, p: IndexPayload, now: datetime, cal: TradingCalendar | None) -> dict:
     exp = option_expiry(c, p)
-    base = {"available": False, "reason": None, "forward": None, "index_spot": p.price, "basis": None,
+    base = {"available": False, "reason": None, "prior_close": False, "forward": None, "index_spot": p.price,
+            "basis": None,
             "basis_raw": None, "basis_window": None,
             "rate": config.FUTURES_RATE, "rate_source": config.FUTURES_RATE_SOURCE, "t_years": None,
             "strikes": [], "usable_pairs": 0, "spread": None, "option_root": config.FUTURES[c.index]["option_root"],
@@ -237,6 +231,12 @@ def parity_block(c: FuturesContract, p: IndexPayload, now: datetime, cal: Tradin
     if exp is None:
         base["reason"] = (f"Cboe's payload lists no {base['option_root']} AM options for {c.expiry:%b %d}, "
                           "the expiry that settles this contract")
+        return base
+    if predates_session(cal, p.index_time, now):
+        # Never a basis from today's option quotes over yesterday's index, and never into the smoothing history.
+        base["prior_close"] = True
+        base["reason"] = (f"Cboe's {p.index} value is still the prior close (its first live value arrives about "
+                          f"09:45 ET), so a basis would mix today's option quotes with yesterday's {p.index}")
         return base
     t_ref = valuation_time(cal, now, p.payload_ts)
     T = time_to_expiry(t_ref, exp, "AM", cal)
@@ -290,18 +290,31 @@ def to_futures(level: float, basis: float, ratio: float = 1.0, tick: float | Non
     return round_tick(level * ratio + basis, tick)
 
 
-def etf_ratio(etf: str, p: IndexPayload, trade_at) -> dict:
+def pair_time(index_time: datetime, cal: TradingCalendar | None) -> datetime:
+    """The instant to price the ETF at. The index stops at the session close, so an index time stamped after that
+    day's close (Cboe stamps the closing value 16:14:59) pairs with the ETF's regular-session close, never an
+    after-hours print."""
+    if cal is None:
+        return index_time
+    d = index_time.astimezone(NY).date()
+    if not cal.is_session(d):
+        return index_time
+    return min(index_time, cal.close_dt(d))
+
+
+def etf_ratio(etf: str, p: IndexPayload, trade_at, cal: TradingCalendar | None = None) -> dict:
     """ratio = index / ETF at the index value's market-data time. trade_at(symbol, at, lookback_s) -> Spot | None.
     Raises SourceError when no ETF price of that instant exists."""
     if p.index_time is None:
         raise SourceError(f"Cboe's {p.index} payload carries no index time, so no same-instant {etf} price")
-    tr = trade_at(etf, p.index_time, config.FUTURES_RATIO_MAX_LAG_S)
+    at = pair_time(p.index_time, cal)
+    tr = trade_at(etf, at, config.FUTURES_RATIO_MAX_LAG_S)
     if tr is None or not tr.price:
-        raise SourceError(f"no {etf} trade within {config.FUTURES_RATIO_MAX_LAG_S} s before {iso_z(p.index_time)}")
+        raise SourceError(f"no {etf} trade within {config.FUTURES_RATIO_MAX_LAG_S} s before {iso_z(at)}")
     return {"value": p.price / tr.price, "index_price": p.price, "index_time": iso_z(p.index_time),
             "etf": etf, "etf_price": tr.price, "etf_time": iso_z(tr.ts),
-            "lag_s": round((p.index_time - tr.ts).total_seconds(), 1) if tr.ts else None, "source": tr.source,
-            "note": (f"{p.index} from Cboe (its {p.index_time.astimezone(NY):%H:%M:%S} ET value) over the last {etf} "
+            "lag_s": round((at - tr.ts).total_seconds(), 1) if tr.ts else None, "source": tr.source,
+            "note": (f"{p.index} from Cboe (its {at.astimezone(NY):%H:%M:%S} ET value) over the last {etf} "
                      f"trade at or before that second (Alpaca). Same instant, so the 15 minute delay drops out.")}
 
 
@@ -347,7 +360,7 @@ def build(ticker: str, *, now: datetime, cal: TradingCalendar | None, market_ope
             return out
         key = (etf, iso_z(p.index_time), p.price)
         try:
-            rb = _RATIO_CACHE.get(key) or etf_ratio(etf, p, trade_at)
+            rb = _RATIO_CACHE.get(key) or etf_ratio(etf, p, trade_at, cal)
         except SourceError as e:
             out["reason"] = f"{etf} to {index} ratio unavailable: {e}"
             return out
@@ -359,7 +372,8 @@ def build(ticker: str, *, now: datetime, cal: TradingCalendar | None, market_ope
 
     if override_price is not None:
         out["override"] = _override(index, etf or _etf_for(index), p, ratio if etf else None, override_price,
-                                    market_open, trade_at, latest_trade, demo)
+                                    market_open, trade_at, latest_trade, demo, cal,
+                                    prior_close=bool(par.get("prior_close")))
         if out["override"].get("basis") is not None:
             override_basis = out["override"]["basis"]
     if override_basis is not None:
@@ -378,7 +392,8 @@ def build(ticker: str, *, now: datetime, cal: TradingCalendar | None, market_ope
     return out
 
 
-def _override(index, etf, p: IndexPayload, ratio_known, price, market_open, trade_at, latest_trade, demo) -> dict:
+def _override(index, etf, p: IndexPayload, ratio_known, price, market_open, trade_at, latest_trade, demo,
+              cal: TradingCalendar | None = None, prior_close: bool = False) -> dict:
     """basis = the typed price minus the latest index value; live when Alpaca keys and an open market allow it."""
     o = {"price": price, "index_value": p.price, "index_source": "cboe_delayed", "index_time": iso_z(p.index_time),
          "delayed": True, "basis": None, "at": None,
@@ -388,14 +403,18 @@ def _override(index, etf, p: IndexPayload, ratio_known, price, market_open, trad
     elif not market_open:
         o["label"] = f"Cboe {index} at the close: your basis also holds any move since the close"
     elif trade_at is not None and latest_trade is not None:
+        if prior_close:
+            o["label"] = f"Cboe {index} prior close: your basis also holds the move since that close"
         try:
-            ratio = ratio_known if ratio_known is not None else etf_ratio(etf, p, trade_at)["value"]
+            ratio = ratio_known if ratio_known is not None else etf_ratio(etf, p, trade_at, cal)["value"]
             last = latest_trade(etf)
             o.update(index_value=round(last.price * ratio, 4), index_source="live_etf_ratio",
                      index_time=iso_z(last.ts), delayed=False,
                      label=f"Live {index} estimate: last {etf} trade times the {index}/{etf} ratio")
         except SourceError as e:
             o["label"] += f" (live estimate unavailable: {e})"
+    elif prior_close:
+        o["label"] = f"Cboe {index} prior close: your basis also holds the move since that close"
     o["basis"] = round(price - o["index_value"], 4)
     o["at"] = o["index_time"]
     return o

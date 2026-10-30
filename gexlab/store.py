@@ -251,6 +251,8 @@ MIGRATIONS = [
     ("captures", "gex_charged_pct", "REAL"),       # % of the band |GEX| total that is that charge
     ("session_processing", "study_eligible", "INTEGER"),  # 1 = counts toward the studies under the declared cohort
     ("session_processing", "study_reasons", "TEXT"),      # why it does not count (comma separated), null when it does
+    ("captures", "index_ts", "TEXT"),              # Cboe index captures: the index value's own market-data time
+                                                   # (last_trade_time); NULL before 2026-10-29 and for Alpaca feeds
 ]
 
 # Indexes that depend on migrated columns: created after MIGRATIONS ran.

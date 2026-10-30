@@ -624,6 +624,8 @@ def build(m: dict, *, zero_dte: dict | None = None, scorecard: dict | None = Non
         blocked.append(f"the feed is stale (no successful refresh in {config.STALE_AFTER_S // 60} min)")
     elif feed.get("market_open") and (feed.get("data_age_s") or 0) > config.GUIDANCE_MAX_DATA_AGE_S:
         blocked.append(f"the vendor data is {int(feed['data_age_s'] // 60)} min old")
+    if (m.get("spot") or {}).get("basis") == "prior_close":
+        blocked.append("the index value is the prior close until Cboe's first live value, about 09:45 ET")
     cv = m.get("coverage") or {}
     if cv.get("gate_pct") is not None and cv.get("eligible"):
         if cv.get("gex_pct") is None:

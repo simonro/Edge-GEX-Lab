@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { api } from "../api/client";
-import type { Expiration, FuturesView, GexMap, Magnitude, SearchHit } from "../api/types";
+import type { Dex, Expiration, FuturesView, GexMap, Magnitude, SearchHit, VolDrift } from "../api/types";
 import GexProfile, { type ProfileLevels } from "../components/GexProfile";
 import GuidancePanel from "../components/GuidancePanel";
 import { Drawer, ErrorState, Icon, Lead, Panel, Seg, Skeleton, usePresent, useTopMeta } from "../components/ui";
-import { GEX_UNITS, dayFull, dayShort, distText, gex, int, nyTime, nyToday, pct, price, px, strike } from "../lib/format";
+import { GEX_UNITS, dayFull, dayShort, distText, gex, int, nyDay, nyTime, nyToday, pct, price, px, signed as signedNum, spotRef, strike } from "../lib/format";
 import { CURRENT_GATE, gateMin } from "../lib/gate";
 import FuturesPanel from "../components/FuturesPanel";
 import { FUTURES_TICKERS, convOf, futPx, toFut, type FutConv, type StoredOverride } from "../lib/futures";
@@ -562,6 +562,7 @@ export default function LiveMap({ initialTicker, onTicker }: { initialTicker: st
           <div className="side">
             {futOn && <FuturesPanel ticker={ticker} f={futData} error={futQ.error} loading={futQ.loading} ov={ov} onOverride={setOverride} />}
             <LevelsPanel m={m} levels={levels} frozen={showFrozen} layout="grid" onExplain={() => setDrawer(true)} fut={conv} />
+            {m && m.vol_drift !== undefined && <VolDriftCard m={m} onExplain={() => setDrawer(true)} />}
             <ExpiryPanel m={m} exps={expList} />
             {m && m.warnings.length > 0 && (
               <Panel title="Notes">
@@ -777,6 +778,8 @@ function LevelsPanel({
   const reg = m.levels.regime;
   const ft = m.frozen_today;
   const shared = levels.call_wall !== null && levels.call_wall === levels.put_wall;
+  const prior = m.spot.basis === "prior_close";
+  const ref = spotRef(m.spot.basis);
   const nowNote = (cur: number | null, fmt: (v: number | null) => string) => (frozen ? <>Now {fmt(cur)}.</> : null);
 
   const tiles: Kpi[] = [
@@ -784,8 +787,9 @@ function LevelsPanel({
       key: "spot",
       label: "Spot",
       value: px(S, m.ticker),
-      sub:
-        m.spot.basis === "regular_close"
+      sub: prior
+        ? `${t} prior close (Cboe, ${nyDay(m.spot.ts)} ${nyTime(m.spot.ts, true)} ET). Cboe's first live value arrives about 09:45 ET.`
+        : m.spot.basis === "regular_close"
           ? m.spot.source === "cboe"
             ? "Regular close (Cboe)"
             : "Regular close"
@@ -808,7 +812,7 @@ function LevelsPanel({
           <span className="g">{strike(levels.call_wall)}</span>
         </>
       ),
-      sub: distText(levels.call_wall, S, t),
+      sub: distText(levels.call_wall, S, t, ref),
       def: (
         <>
           Both exposure peaks occur at this strike. {nowNote(m.levels.call_wall, strike)}
@@ -828,7 +832,7 @@ function LevelsPanel({
         ),
         value: strike(levels.call_wall),
         valueClass: "g",
-        sub: distText(levels.call_wall, S, t),
+        sub: distText(levels.call_wall, S, t, ref),
         def: frozen ? nowNote(m.levels.call_wall, strike) : m.signed ? undefined : "Largest call exposure.",
       },
       {
@@ -842,7 +846,7 @@ function LevelsPanel({
         ),
         value: strike(levels.put_wall),
         valueStyle: { color: "var(--purple-1)" },
-        sub: distText(levels.put_wall, S, t),
+        sub: distText(levels.put_wall, S, t, ref),
         def: frozen ? nowNote(m.levels.put_wall, strike) : m.signed ? undefined : "Largest put exposure.",
       },
     );
@@ -863,7 +867,7 @@ function LevelsPanel({
         ),
         value: levels.nearest_zero_gamma === null ? "None" : px(levels.nearest_zero_gamma, m.ticker),
         valueClass: "p",
-        sub: levels.nearest_zero_gamma === null ? "no crossing within 10%" : distText(levels.nearest_zero_gamma, S, t),
+        sub: levels.nearest_zero_gamma === null ? "no crossing within 10%" : distText(levels.nearest_zero_gamma, S, t, ref),
         def: (
           <>
             Where modeled net GEX crosses zero. {nowNote(m.levels.nearest_zero_gamma, (v) => (v === null ? "none" : px(v, m.ticker)))}
@@ -876,7 +880,7 @@ function LevelsPanel({
         value: reg === "positive" ? "Positive" : reg === "negative" ? "Negative" : "Neutral",
         valueClass: "word",
         valueStyle: { color: reg === "positive" ? "var(--green)" : reg === "negative" ? "var(--purple-2)" : "var(--text)" },
-        sub: "at current spot",
+        sub: prior ? "at the prior close" : "at current spot",
         def: "Positive does not mean bullish.",
       },
       {
@@ -929,7 +933,7 @@ function LevelsPanel({
           <span className="fut-idx">
             {t} {idx}
           </span>
-          {k.key === "spot" ? <> · {k.sub}</> : <> · {distText(v, S, t)}</>}
+          {k.key === "spot" ? <> · {k.sub}</> : <> · {distText(v, S, t, ref)}</>}
         </>
       );
     }
@@ -972,6 +976,7 @@ function LevelsPanel({
         ))}
       </div>
       {m.signed && m.magnitude && <MagnitudeRef mg={m.magnitude} layout={layout} onExplain={onExplain} />}
+      {m.signed && m.dex && <DexLine dx={m.dex} onExplain={onExplain} />}
       {!m.signed && (
         <p className="kpi-note">
           <b>{UNSIGNED_NOTE}</b> {SIDES_NOTE}
@@ -1287,6 +1292,8 @@ function MethodBody({ m, ticker }: { m: GexMap | null; ticker: string }) {
         </ul>
       </section>
       <MagnitudeSection m={m} />
+      <DexSection m={m} />
+      <VolDriftSection m={m} />
       <section>
         <h3>Net GEX at hypothetical prices</h3>
         <p>
@@ -1301,7 +1308,9 @@ function MethodBody({ m, ticker }: { m: GexMap | null; ticker: string }) {
             <dd>{m.feed.label}</dd>
             <dt>Spot</dt>
             <dd>
-              {m.spot.basis === "regular_close"
+              {m.spot.basis === "prior_close"
+                ? `${price(m.spot.price)}, the prior session's close: Cboe's payload${m.feed.data_ts ? ` stamped ${nyTime(m.feed.data_ts, true)} ET` : ""} still carries the ${nyDay(m.spot.ts)} ${nyTime(m.spot.ts, true)} ET index value. Its first live value arrives about 09:45 ET; until then the gamma sign and distances are measured at that close.`
+                : m.spot.basis === "regular_close"
                 ? m.spot.source === "cboe"
                   ? `${price(m.spot.price)}, the regular-session close from the Cboe delayed payload${m.feed.data_ts ? ` stamped ${nyWeekday(m.feed.data_ts)} ${nyTime(m.feed.data_ts, true)} ET` : ""}`
                   : `${price(m.spot.price)}, the regular-session close (${m.spot.source}); extended-hours prints are ignored`
@@ -1363,6 +1372,181 @@ function MethodBody({ m, ticker }: { m: GexMap | null; ticker: string }) {
         <p>Open interest is end of day, so this map cannot show intraday positioning. It describes where gamma sits under one assumption. It makes no forecast.</p>
       </section>
     </>
+  );
+}
+
+// ---------- DEX: one context line under Net GEX size (positioning size only) ----------
+const DEX_TIP =
+  "DEX: delta exposure from open interest, delta x OI x 100 x spot. Net is call delta exposure minus put delta exposure: positive when call delta exposure is larger, negative when put delta exposure is larger. Delta weighted, not a count of open interest. Built from the previous session's open interest: not a live flow scoreboard.";
+function dexSide(net: number): string {
+  return net > 0 ? "call delta exposure larger" : net < 0 ? "put delta exposure larger" : "balanced";
+}
+function DexLine({ dx, onExplain }: { dx: Dex; onExplain?: () => void }) {
+  return (
+    <div className="dex-line">
+      <small>
+        DEX
+        <button type="button" className="mag-info" title={DEX_TIP} aria-label="What DEX means" onClick={onExplain}>
+          <Icon name="info" size={12} />
+        </button>
+      </small>
+      {dx.available && dx.net_usd !== null ? (
+        <span>
+          Net <b>{gex(dx.net_usd, { sign: true })}</b> of delta ({dexSide(dx.net_usd)}) {"\u00b7"} calls {gex(dx.call_usd)}, puts {gex(dx.put_usd)}, unsigned.{" "}
+          <span className="muted">From {dayShort(dx.oi_date)} open interest: not a live flow scoreboard.</span>
+        </span>
+      ) : (
+        <span className="muted">Unavailable: {dx.reason ?? "no usable contracts"}</span>
+      )}
+    </div>
+  );
+}
+
+// ---------- Vol Drift: is ATM implied volatility rising or falling today ----------
+const VD_WORD: Record<string, string> = { rising: "Rising", falling: "Falling", flat: "Flat" };
+function refSource(vd: VolDrift): string {
+  const r = vd.reference;
+  if (!r) return "";
+  if (r.source === "recorder") return r.kind === "frozen" ? "10:00 capture" : "first recorded snapshot";
+  if (r.source === "demo") return "synthetic fixture";
+  return "first reading this session";
+}
+function VolDriftCard({ m, onExplain }: { m: GexMap; onExplain?: () => void }) {
+  const vd = m.vol_drift ?? null;
+  const chip = (
+    <span className="g-chip" title="No study tests whether IV drift, alone or with the gamma sign, says anything about the moves that follow.">
+      Untested
+    </span>
+  );
+  const title = (
+    <>
+      Vol drift
+      <button type="button" className="mag-info" title="ATM implied volatility now against the session's first reading. Rising: the options market is pricing bigger moves. Falling: smaller." aria-label="How Vol drift is calculated" onClick={onExplain}>
+        <Icon name="info" size={12} />
+      </button>
+    </>
+  );
+  if (!vd) {
+    return (
+      <Panel title={title} right={chip} className="vd-panel">
+        <p className="vd-na">Unavailable: the measurement could not be built.</p>
+      </Panel>
+    );
+  }
+  const cur = vd.current;
+  const ref = vd.reference;
+  const exp = vd.expiry ? `${dayShort(vd.expiry)}${vd.settlement === "AM" ? " AM" : ""} expiry` : null;
+  const word = vd.label ? VD_WORD[vd.label] : null;
+  return (
+    <Panel title={title} right={chip} className="vd-panel">
+      {!vd.available || !cur ? (
+        <p className="vd-na">{vd.reason ?? "Unavailable."}</p>
+      ) : (
+        <div className="vd-body">
+          <div className="vd-head">
+            <span className={`vd-word ${vd.label ?? "none"}`}>{word ?? "No reference yet"}</span>
+            {vd.change_pts !== null && (
+              <span className="vd-chg" title={vd.threshold_pts !== null ? `Flat while the change is under ${vd.threshold_pts.toFixed(2)} vol points (the larger of ${vd.flat_min_pts} point and ${Math.round(vd.flat_rel * 100)}% of the reference IV)` : undefined}>
+                {signedNum(vd.change_pts, 1)} vol pts
+              </span>
+            )}
+          </div>
+          <div className="vd-row">
+            ATM IV <b>{cur.iv_pct.toFixed(1)}%</b> now
+            {ref ? (
+              <>
+                {" "}{"\u00b7"} <b>{ref.iv_pct.toFixed(1)}%</b> at {nyTime(ref.ts)} ET <span className="muted">({refSource(vd)})</span>
+              </>
+            ) : null}
+          </div>
+          {!ref && vd.reference_reason && <div className="vd-sub">{vd.reference_reason}</div>}
+          <div className="vd-sub">
+            {exp}, strikes {strike(cur.k_lo)}
+            {cur.k_hi !== cur.k_lo ? ` / ${strike(cur.k_hi)}` : ""}. Never 0DTE: the nearest expiry with three full trading days left.
+          </div>
+          {m.signed && vd.pairing && <p className="vd-pair">{vd.pairing}</p>}
+        </div>
+      )}
+    </Panel>
+  );
+}
+
+function DexSection({ m }: { m: GexMap | null }) {
+  const dx = m?.dex ?? null;
+  return (
+    <section>
+      <h3>DEX (delta exposure)</h3>
+      <div className="formula">
+        {"DEX = Delta · OI · 100 · S\n"}
+        <span className="c">{"units = dollars of the underlying\n"}</span>
+        <span className="c">{"net   = calls minus puts (put delta is negative)"}</span>
+      </div>
+      <p>
+        {dx?.method ??
+          "Delta is Black-Scholes with r = q = 0, the same IV and valuation clock as GEX. Net is call delta exposure minus put delta exposure."}
+      </p>
+      <p>
+        {dx?.caveat ?? "Built from the previous session's open interest, so it sizes yesterday's positioning at today's price and IV. It is not a live flow scoreboard."} It is a
+        size for positioning context only.
+      </p>
+      {dx && dx.available && (
+        <dl className="kv">
+          <dt>Net DEX</dt>
+          <dd>
+            {gex(dx.net_usd, { sign: true })}: calls minus puts, {dexSide(dx.net_usd ?? 0)}.
+          </dd>
+          <dt>Calls, unsigned</dt>
+          <dd>{gex(dx.call_usd)}</dd>
+          <dt>Puts, unsigned</dt>
+          <dd>{gex(dx.put_usd)}</dd>
+          <dt>Contracts</dt>
+          <dd>
+            {int(dx.contracts)} valid contracts of the selected expiries, open interest from {dayFull(dx.oi_date)}.
+          </dd>
+        </dl>
+      )}
+    </section>
+  );
+}
+
+function VolDriftSection({ m }: { m: GexMap | null }) {
+  const vd = m?.vol_drift ?? null;
+  return (
+    <section>
+      <h3>Vol drift</h3>
+      <p>
+        Is implied volatility rising or falling today? Rising means the options market is pricing bigger moves than at the session's first reading; falling means smaller.
+      </p>
+      <p>{vd?.method ?? "At-the-money implied volatility of the nearest expiry with at least three full trading days left, interpolated between the two strikes that bracket spot. Never 0DTE."}</p>
+      <p>{vd?.reference_method ?? "Reference: the first measurement of the session, labeled with its time."}</p>
+      <p>
+        Flat while the change from the reference is under the larger of {vd?.flat_min_pts ?? 0.5} vol point and {Math.round((vd?.flat_rel ?? 0.05) * 100)}% of the reference IV
+        {vd?.threshold_pts != null ? ` (${vd.threshold_pts.toFixed(2)} points here)` : ""}; rising or falling at or beyond it. Both values are round starting values, not tuned on any
+        outcome.
+      </p>
+      <p>{vd?.clock_note ?? "Time to expiry is calendar time, so part of any change is the clock itself."}</p>
+      <p>
+        The sentence that joins the drift to the modeled gamma sign is <b>untested</b>: no study here checks whether it says anything about the moves that follow. It describes conditions;
+        it makes no forecast.
+      </p>
+      {vd && vd.available && vd.current && (
+        <dl className="kv">
+          <dt>Expiry</dt>
+          <dd>
+            {dayFull(vd.expiry)} ({vd.settlement} settled), fixed for the {dayShort(vd.session)} session.
+          </dd>
+          <dt>Now</dt>
+          <dd>
+            {vd.current.iv_pct.toFixed(2)}% at {nyTime(vd.current.ts, true)} ET: strike {strike(vd.current.k_lo)} at {vd.current.iv_lo_pct.toFixed(2)}%
+            {vd.current.k_hi !== vd.current.k_lo ? `, strike ${strike(vd.current.k_hi)} at ${vd.current.iv_hi_pct.toFixed(2)}%` : ""}, spot {price(vd.current.spot)}, {vd.current.usable} usable IVs within 5%.
+          </dd>
+          <dt>Reference</dt>
+          <dd>
+            {vd.reference ? `${vd.reference.iv_pct.toFixed(2)}% at ${nyTime(vd.reference.ts, true)} ET (${refSource(vd)}).` : vd.reference_reason ?? "None yet."}
+          </dd>
+        </dl>
+      )}
+    </section>
   );
 }
 

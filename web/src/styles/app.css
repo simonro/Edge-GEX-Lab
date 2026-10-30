@@ -2273,3 +2273,87 @@ button.cell {
 .drawer .mag-table {
   margin-top: 4px;
 }
+
+/* ---------- DEX line (positioning context) and the Vol drift card: private edition only, the export strips this block ---------- */
+.dex-line {
+  display: grid;
+  gap: 4px;
+  margin-top: 8px;
+  padding: 9px 12px 10px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--r-s);
+  font: 400 11.5px/1.45 var(--body);
+  color: var(--text-2);
+}
+.dex-line small {
+  font: 600 10px/1 var(--mono);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--muted);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.dex-line b {
+  font: 600 12.5px/1 var(--mono);
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+.dex-line .muted,
+.vd-panel .muted {
+  color: var(--muted);
+}
+.vd-panel .panel-h > span:first-child {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.vd-body {
+  display: grid;
+  gap: 6px;
+}
+.vd-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+}
+.vd-word {
+  font: 600 20px/1.1 var(--display);
+  color: var(--text);
+}
+.vd-word.rising {
+  color: var(--amber);
+}
+.vd-word.none {
+  font-size: 14px;
+  color: var(--muted);
+}
+.vd-chg {
+  font: 600 13px/1 var(--mono);
+  color: var(--text-2);
+  font-variant-numeric: tabular-nums;
+}
+.vd-row {
+  font: 400 12.5px/1.4 var(--body);
+  color: var(--text-2);
+}
+.vd-row b {
+  font: 600 13px/1 var(--mono);
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+.vd-sub,
+.vd-na {
+  font: 400 11.5px/1.4 var(--body);
+  color: var(--muted);
+  margin: 0;
+}
+.vd-pair {
+  margin: 2px 0 0;
+  padding: 7px 9px;
+  border-left: 2px solid var(--line-2);
+  font: 400 12px/1.45 var(--body);
+  color: var(--text-2);
+}

@@ -184,15 +184,30 @@ export function px(v: number | null | undefined, ticker: string): string {
   return price(v, isIndex(ticker) ? 0 : 2);
 }
 
-/** "$2.35 below spot" (SPY, QQQ, stocks) or "4 index points above spot" (SPX, NDX). */
-export function distText(level: number | null | undefined, spot: number, ticker: string): string {
+/** "$2.35 below spot" (SPY, QQQ, stocks) or "4 index points above spot" (SPX, NDX). ref names what spot is
+ *  ("the prior close" while Cboe still carries the prior session's index value). */
+export function distText(level: number | null | undefined, spot: number, ticker: string, ref = "spot"): string {
   if (level === null || level === undefined || !Number.isFinite(level)) return "none in range";
   const d = level - spot;
-  if (Math.abs(d) < 0.005) return "at spot";
+  if (Math.abs(d) < 0.005) return `at ${ref}`;
   const dp = isIndex(ticker) ? 0 : 2;
   const a = Math.abs(d).toLocaleString("en-US", { minimumFractionDigits: dp, maximumFractionDigits: dp });
   const side = d > 0 ? "above" : "below";
-  return isIndex(ticker) ? `${a} index points ${side} spot` : `$${a} ${side} spot`;
+  return isIndex(ticker) ? `${a} index points ${side} ${ref}` : `$${a} ${side} ${ref}`;
+}
+
+/** What distances are measured from: "spot", or "the prior close" when the map's spot is the prior session's. */
+export function spotRef(basis: string | null | undefined): string {
+  return basis === "prior_close" ? "the prior close" : "spot";
+}
+
+const fmtNyDay = new Intl.DateTimeFormat("en-US", { timeZone: "America/New_York", month: "short", day: "numeric" });
+
+/** "Oct 28" in New York time. */
+export function nyDay(iso: string | null | undefined): string {
+  if (!iso) return "n/a";
+  const d = new Date(iso);
+  return Number.isNaN(d.getTime()) ? "n/a" : fmtNyDay.format(d);
 }
 
 /**

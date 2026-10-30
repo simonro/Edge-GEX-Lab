@@ -7,6 +7,7 @@ import type {
   CaptureRow,
   CaptureStatus,
   Comparator,
+  Dex,
   Expirations,
   GexMap,
   Health,
@@ -17,6 +18,7 @@ import type {
   Scorecard,
   SearchHit,
   Touch,
+  VolDrift,
 } from "../api/types";
 
 const SESSION = "2026-10-19"; // synthetic "today" (a Monday)
@@ -307,11 +309,49 @@ function buildMap(ticker: string, expiries: string[], signed: boolean): GexMap {
       .map(([expiry, v], i) => ({ expiry, contracts: v.contracts, valid_pct: Math.round((99.2 - i * 0.3) * 10) / 10, net_gex: v.net })),
     totals,
     magnitude: mockMagnitude(ticker, totals.call_gex + totals.put_gex * (signed ? 1 : -1), S, totals.call_gex, totals.put_gex),
+    dex: mockDex(ticker, S, Math.abs(totals.call_gex), Math.abs(totals.put_gex), eligible),
+    vol_drift: mockVolDrift(ticker, S, c.step, regime),
     levels: { call_wall: callWall, put_wall: putWall, zero_gamma: zeros, nearest_zero_gamma: nearest, regime },
     profile_curve: curve,
     frozen_today: frozen,
     lead,
     warnings,
+  };
+}
+
+// ---------- Vol Drift and DEX (synthetic; contract section "Vol Drift and DEX") ----------
+const MOCK_IV: Record<string, [number, number]> = { SPY: [17.4, 16.1], QQQ: [19.4, 21.0], SPX: [15.5, 15.9], NDX: [20.6, 21.7] };
+const PAIR: Record<string, string> = {
+  "negative rising": "Negative gamma and rising IV: the conditions where moves tend to get bigger.",
+  "positive falling": "Positive gamma and falling IV: the conditions where moves tend to stay smaller.",
+  "positive flat": "Positive gamma with flat IV: no change in the size of moves the options market prices.",
+};
+function mockVolDrift(ticker: string, S: number, step: number, regime: string): VolDrift {
+  const [ref, cur] = MOCK_IV[ticker] ?? [41.2, 41.8];
+  const chg = Math.round((cur - ref) * 10) / 10;
+  const band = Math.round(Math.max(0.5, 0.05 * ref) * 100) / 100;
+  const label = chg >= band ? "rising" : chg <= -band ? "falling" : "flat";
+  const kLo = Math.floor(S / step) * step;
+  return {
+    available: true, reason: null, expiry: ticker === "NVDA" ? "2026-10-23" : "2026-10-22", settlement: "PM", session: SESSION,
+    current: { iv_pct: cur, ts: nyIso(SESSION, 10, 0, 41), spot: S, k_lo: kLo, k_hi: kLo + step, iv_lo_pct: cur - 0.05, iv_hi_pct: cur + 0.05, usable: 120 },
+    reference: { iv_pct: ref, ts: nyIso(SESSION, 9, 45, 0), data_ts: nyIso(SESSION, 9, 45, 0), source: "demo", kind: "snapshot" },
+    reference_reason: null, change_pts: chg, label, threshold_pts: band, flat_min_pts: 0.5, flat_rel: 0.05,
+    regime: regime as VolDrift["regime"], pairing: PAIR[`${regime} ${label}`] ?? null, tested: false,
+    chip: "Untested: no study tests this pairing",
+    method: "At-the-money implied volatility of the nearest expiry with at least three full trading days left (synthetic fixture).",
+    reference_method: "Reference: the first measurement of the session (synthetic fixture).",
+    clock_note: "Time to expiry is calendar time, so part of any change is the clock itself.",
+  };
+}
+function mockDex(_ticker: string, _spot: number, callGex: number, putGex: number, contracts: number): Dex {
+  // synthetic sizes in the same order as the GEX totals; not a model output
+  const call = callGex * 40;
+  const put = putGex * 32;
+  return {
+    available: true, reason: null, net_usd: call - put, call_usd: call, put_usd: put, contracts, oi_date: PRIOR,
+    caveat: "Built from the previous session's open interest, so it sizes yesterday's positioning at today's price and IV. It is not a live flow scoreboard.",
+    method: "DEX per contract = delta x OI x 100 x spot, net = calls minus puts (synthetic fixture).",
   };
 }
 

@@ -117,6 +117,11 @@ class TradingCalendar:
             return False
         return s.open <= ny.time().replace(microsecond=0) < s.close
 
+    def open_dt(self, d: date) -> datetime | None:
+        """Session open of day d (09:30 ET) as an aware UTC datetime; None when d is not a session."""
+        s = self.sessions.get(d)
+        return datetime.combine(d, s.open, NY).astimezone(UTC) if s else None
+
     def close_dt(self, d: date) -> datetime:
         """Session close of day d (16:00 ET or the early close) as an aware UTC datetime."""
         return datetime.combine(d, self.close_time(d), NY).astimezone(UTC)
@@ -146,6 +151,16 @@ def valuation_time(cal: "TradingCalendar | None", now: datetime,
         return min(quote_time, now) if quote_time is not None else now
     close = cal.last_close(now)
     return min(quote_time, close) if quote_time is not None else close
+
+
+def predates_session(cal: "TradingCalendar | None", value_ts: datetime | None, now: datetime) -> bool:
+    """True when the market is open at now and value_ts is earlier than today's session open: a prior session's
+    value served during today's session. Cboe's delayed payload carries the prior close as the index value until
+    its first live value, about 09:45 ET (seen 2026-10-29: last_trade_time Oct 28 16:14:59 at 09:39 ET)."""
+    if cal is None or value_ts is None or not cal.market_open(now):
+        return False
+    opened = cal.open_dt(now.astimezone(NY).date())
+    return opened is not None and value_ts < opened
 
 
 def valuation_label(valuation: datetime, at_close: bool = True) -> str:

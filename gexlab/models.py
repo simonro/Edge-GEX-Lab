@@ -66,6 +66,8 @@ class Spot:
     source: str                     # alpaca_sip | alpaca_iex | cboe | demo
     basis: str = "last_trade"       # last_trade (in session) | regular_close (market closed: the session's
                                     # official close, never an extended-hours print) | payload (Cboe current_price)
+                                    # | prior_close (Cboe, market open but the index value predates today's open;
+                                    # ts is then the index's own time, see cboe.parse_chain)
 
 
 @dataclass
@@ -86,6 +88,8 @@ class Chain:
     oi_info: dict = field(default_factory=dict)  # OI provenance: label, basis, matched counts, fallback reason
     valuation_ts: datetime | None = None  # the one clock T is measured from (see calendar.valuation_time);
                                           # None = as_of (demo fixtures, older callers)
+    index_ts: datetime | None = None    # Cboe index chains: the index value's own market-data time (Cboe's
+                                        # last_trade_time, about 15 min before source_ts); None for other feeds
 
     @property
     def valuation(self) -> datetime:

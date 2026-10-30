@@ -47,7 +47,7 @@ from zoneinfo import ZoneInfo
 import httpx
 
 from gexlab import config
-from gexlab.engine.calendar import UTC, TradingCalendar, ny_today, time_to_expiry, valuation_time
+from gexlab.engine.calendar import NY, UTC, TradingCalendar, ny_today, predates_session, time_to_expiry, valuation_time
 from gexlab.engine.gex import iv_ok
 from gexlab.engine.iv import implied_volatility
 from gexlab.models import Chain, Contract, Spot, parse_occ
@@ -60,6 +60,21 @@ def parse_cboe_timestamp(s: str) -> datetime:
     dt = datetime.strptime(s.strip(), "%Y-%m-%d %H:%M:%S")
     tz = UTC if config.CBOE_TIMESTAMP_TZ.upper() == "UTC" else ZoneInfo(config.CBOE_TIMESTAMP_TZ)
     return dt.replace(tzinfo=tz).astimezone(UTC)
+
+
+def parse_index_time(s: str | None) -> datetime | None:
+    """Cboe's `last_trade_time` ("2026-10-21T11:44:31") is New York wall time with no zone (checked 2026-10-21:
+    payload timestamp 15:59:33Z = 11:59:33 ET, last_trade_time 11:44:31, the 15 minute delay)."""
+    if not s:
+        return None
+    try:
+        return datetime.fromisoformat(s.strip()[:19]).replace(tzinfo=NY).astimezone(UTC)
+    except (TypeError, ValueError):
+        return None
+
+
+PRIOR_CLOSE_WARNING = ("{t} is the prior close: Cboe's first live {t} value arrives about 09:45 ET. Spot, the gamma "
+                       "sign and the distances are measured at that close; the walls are strikes and still apply.")
 
 
 def settlement_for_root(ticker: str, root: str) -> str | None:
@@ -306,15 +321,25 @@ def parse_chain(ticker: str, body: bytes, as_of: datetime, cal: TradingCalendar 
     # regular-session close (indexes have no extended hours). Label it so, stamped at the close; the
     # payload time stays in source_ts (feed.data_ts) for the method drawer.
     spot = Spot(float(price), src_ts, "cboe", basis="payload")
+    index_ts = parse_index_time(data.get("last_trade_time"))
     if cal is not None and src_ts is not None and not cal.market_open(as_of):
         try:
             close = cal.last_close(as_of)
         except ValueError:
             close = None
-        if close is not None and src_ts >= close:
+        # The closing value only once the index's own time reaches the close: the 16:00 to 16:15 payloads still
+        # carry the 15:45 to 16:00 value (seen 2026-10-29: 7706.14 in the 16:00 file, close 7720.39 at 16:14:59).
+        if close is not None and src_ts >= close and (index_ts is None or index_ts >= close):
             spot = Spot(float(price), close, "cboe", basis="regular_close")
+        elif close is not None and index_ts is not None and index_ts < close and src_ts >= close:
+            spot = Spot(float(price), index_ts, "cboe", basis="payload")
+    # Market open but the index value predates today's open: Cboe still carries the prior close (until about
+    # 09:45 ET). Stamp the spot with the index's own time and say so; the payload time stays in source_ts.
+    if predates_session(cal, index_ts, as_of):
+        spot = Spot(float(price), index_ts, "cboe", basis="prior_close")
+        warnings.insert(0, PRIOR_CLOSE_WARNING.format(t=ticker))
     return Chain(ticker=ticker, as_of=as_of, spot=spot,
-                 feed="cboe_delayed", contracts=contracts, oi_date=oi_date, source_ts=src_ts,
+                 feed="cboe_delayed", contracts=contracts, oi_date=oi_date, source_ts=src_ts, index_ts=index_ts,
                  complete=True, raw_hash=hashlib.sha256(len(body).to_bytes(8, "big") + body).hexdigest(),
                  warnings=warnings, requests=1, valuation_ts=t_ref, oi_source="cboe",
                  oi_info={"source": "cboe", "basis": "inferred", "label": CBOE_INFERRED_LABEL, "oi_date": oi_date,
