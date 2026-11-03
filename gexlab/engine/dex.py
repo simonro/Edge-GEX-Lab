@@ -1,4 +1,4 @@
-"""DEX: delta exposure from open interest. A context line for positioning size only. Display only.
+"""DEX: delta exposure from open interest. A Levels now tile for positioning size only. Display only.
 
 DEX per contract = delta * OI * multiplier * S, in dollars of the underlying (decided 2026-10-28).
   delta: Black-Scholes, r = q = 0, the same IV and the same valuation clock (T) as the GEX of that contract.

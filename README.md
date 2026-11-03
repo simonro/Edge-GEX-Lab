@@ -132,6 +132,17 @@ cd web && npm ci && npm run build && cd ..
 .venv/bin/python -m uvicorn gexlab.api:app --host 127.0.0.1 --port 8240
 ```
 
+**Install with an AI coding assistant:** if you use one (Claude Code, Codex, Cursor or similar), open it
+in an empty folder and paste this prompt:
+
+```text
+Install Edge GEX Lab on this computer from github.com/simonro/Edge-GEX-Lab. Follow the README Quick start
+exactly. First check that Python 3.11+ and Node.js LTS are installed, and if one is missing, tell me
+instead of installing it. Then run the setup, start the app and confirm http://127.0.0.1:8240 opens.
+Do not add any API keys. Show me where the .env file is so I can paste my own Alpaca keys.
+SPX works without keys.
+```
+
 Every install starts empty: no saved maps and no history. Open the page, pick a ticker, and the map
 loads from your own data feed.
 
@@ -174,8 +185,11 @@ Privacy above), linking to its release notes.
   date is inferred from the payload time and labeled. If Cboe is unavailable the map falls back to
   Alpaca open interest and says so.
 - **Feeds.** Alpaca OPRA (paid) gives live quotes and the IV is solved from the mid; Alpaca's free
-  indicative feed gives a modified quote with its own IV. SPX and NDX come from Cboe, about 15 minutes
-  delayed. The map labels which one you are looking at.
+  indicative feed gives a modified quote with its own IV. Alpaca computes no IV for contracts that expire
+  today, so on the free feed the app solves those from the indicative mid the same way it does on OPRA.
+  Checked side by side against OPRA on SPY and QQQ through a session, the walls matched and the flip
+  stayed within 0.25% of spot, but net GEX for today's expiry was off by as much as half. Trust the
+  levels on the free feed more than the bar sizes. SPX and NDX come from Cboe, about 15 minutes delayed. The map labels which one you are looking at.
 - **SPX and NDX before about 09:45 ET.** Cboe's delayed file still carries the prior session's index
   close until its first live value arrives. The map labels spot "prior close" with Cboe's own time, the
   gamma sign and distances say they are measured at that close, guidance shows no setups, and the
