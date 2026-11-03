@@ -440,7 +440,7 @@ def test_flat_pairing_never_claims_zero_change():
 def test_rendered_ui_text_keeps_the_vocabulary_rule():
     from pathlib import Path
     src = (Path(__file__).resolve().parent.parent / "web" / "src" / "screens" / "LiveMap.tsx").read_text(encoding="utf-8")
-    i, j = src.index("// ---------- DEX: one context line"), src.index("const WEEKDAY = new Intl.DateTimeFormat(")
+    i, j = src.index("// ---------- DEX: a Levels now tile"), src.index("const WEEKDAY = new Intl.DateTimeFormat(")
     assert not BANNED.search(src[i:j]) and not DASHES.search(src[i:j])
 
 

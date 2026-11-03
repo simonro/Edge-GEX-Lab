@@ -895,6 +895,7 @@ function LevelsPanel({
         def: GEX_UNITS,
       },
     );
+    if (m.dex) tiles.push(dexTile(m.dex, onExplain));
   } else {
     tiles.push({
       key: "abs",
@@ -941,7 +942,7 @@ function LevelsPanel({
   // No usable quotes: every current-chain value is unavailable, never a neutral sign or a $0 total. The 10:00
   // reference levels (frozen) come from the capture, so they stay.
   if (m.quotes?.usable === false) {
-    const current = frozen ? ["sign", "net", "abs"] : ["cpw", "cw", "pw", "zg", "sign", "net", "abs"];
+    const current = frozen ? ["sign", "net", "abs", "dex"] : ["cpw", "cw", "pw", "zg", "sign", "net", "abs", "dex"];
     for (const k of tiles) {
       if (!current.includes(k.key)) continue;
       Object.assign(k, { value: "Unavailable", valueClass: "word", valueStyle: { color: "var(--muted)" }, sub: "no usable quotes", def: undefined });
@@ -963,7 +964,10 @@ function LevelsPanel({
 
   return (
     <Panel title={title} right={right} className="levels-panel">
-      <div className={`kpis ${layout}`} style={layout === "strip" ? { gridTemplateColumns: `repeat(${tiles.length}, minmax(0, 1fr))` } : undefined}>
+      <div
+        className={`kpis ${layout}`}
+        style={layout === "strip" ? ({ "--n": tiles.length, "--half": Math.ceil(tiles.length / 2) } as CSSProperties) : undefined}
+      >
         {tiles.map((k) => (
           <div className={`kpi ${k.wide ? "wide" : ""}`} key={k.key}>
             <small>{k.label}</small>
@@ -976,7 +980,6 @@ function LevelsPanel({
         ))}
       </div>
       {m.signed && m.magnitude && <MagnitudeRef mg={m.magnitude} layout={layout} onExplain={onExplain} />}
-      {m.signed && m.dex && <DexLine dx={m.dex} onExplain={onExplain} />}
       {!m.signed && (
         <p className="kpi-note">
           <b>{UNSIGNED_NOTE}</b> {SIDES_NOTE}
@@ -1375,31 +1378,39 @@ function MethodBody({ m, ticker }: { m: GexMap | null; ticker: string }) {
   );
 }
 
-// ---------- DEX: one context line under Net GEX size (positioning size only) ----------
+// ---------- DEX: a Levels now tile (positioning size only) ----------
 const DEX_TIP =
   "DEX: delta exposure from open interest, delta x OI x 100 x spot. Net is call delta exposure minus put delta exposure: positive when call delta exposure is larger, negative when put delta exposure is larger. Delta weighted, not a count of open interest. Built from the previous session's open interest: not a live flow scoreboard.";
 function dexSide(net: number): string {
   return net > 0 ? "call delta exposure larger" : net < 0 ? "put delta exposure larger" : "balanced";
 }
-function DexLine({ dx, onExplain }: { dx: Dex; onExplain?: () => void }) {
-  return (
-    <div className="dex-line">
-      <small>
-        DEX
-        <button type="button" className="mag-info" title={DEX_TIP} aria-label="What DEX means" onClick={onExplain}>
-          <Icon name="info" size={12} />
-        </button>
-      </small>
-      {dx.available && dx.net_usd !== null ? (
-        <span>
-          Net <b>{gex(dx.net_usd, { sign: true })}</b> of delta ({dexSide(dx.net_usd)}) {"\u00b7"} calls {gex(dx.call_usd)}, puts {gex(dx.put_usd)}, unsigned.{" "}
-          <span className="muted">From {dayShort(dx.oi_date)} open interest: not a live flow scoreboard.</span>
-        </span>
-      ) : (
-        <span className="muted">Unavailable: {dx.reason ?? "no usable contracts"}</span>
-      )}
-    </div>
+function dexTile(dx: Dex, onExplain?: () => void): Kpi {
+  const label = (
+    <>
+      DEX
+      <button type="button" className="mag-info" title={DEX_TIP} aria-label="What DEX means" onClick={onExplain}>
+        <Icon name="info" size={12} />
+      </button>
+    </>
   );
+  if (!dx.available || dx.net_usd === null) {
+    return { key: "dex", label, value: "Unavailable", valueClass: "word", valueStyle: { color: "var(--muted)" }, sub: dx.reason ?? "no usable contracts" };
+  }
+  return {
+    key: "dex",
+    label,
+    value: gex(dx.net_usd, { sign: true }),
+    sub: (
+      <>
+        calls <span className="g">{gex(dx.call_usd)}</span> / puts <span className="p">{gex(dx.put_usd)}</span>
+      </>
+    ),
+    def: (
+      <>
+        Net delta ({dexSide(dx.net_usd)}) from {dayShort(dx.oi_date)} open interest, not live flow.
+      </>
+    ),
+  };
 }
 
 // ---------- Vol Drift: is ATM implied volatility rising or falling today ----------

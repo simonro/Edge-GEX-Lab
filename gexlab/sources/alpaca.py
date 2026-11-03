@@ -496,9 +496,21 @@ class AlpacaSource:
                 for c in need:
                     self._apply_indicative(c, indicative.get(c.symbol), as_of=as_of, age_gate=age_gate)
         else:
+            n_same_day = 0
             for c in contracts:
                 self._apply_indicative(c, indicative.get(c.symbol), quote_too=True, as_of=as_of,
                                        age_gate=age_gate)
+                # Alpaca computes no IV or greeks for a contract expiring today (its market data FAQ), so on
+                # this feed every same-day contract arrived invalid (issue 29). Solve it from the indicative
+                # mid like the OPRA path: same quote-to-spot alignment, same spread and IV checks.
+                if c.invalid_reason == "no_iv" and c.expiry == today and \
+                        self._apply_opra(c, indicative.get(c.symbol), spot.price, t_cap, cal, spot.ts,
+                                         max_after_s=after):
+                    n_same_day += 1
+            if n_same_day:
+                warnings.append(f"{n_same_day} contracts expiring today use an IV solved from the indicative quote "
+                                "(Alpaca gives no IV for same-day expiries). Walls and the flip hold up against "
+                                "OPRA, but bar sizes and net GEX can read noticeably smaller or larger.")
 
         pair_iv_from_otm(contracts, spot.price)       # after the age check: a dropped IV is never shared
         n_unknown = sum(1 for c in contracts if iv_ok(c.iv) and c.iv_ts is None)
