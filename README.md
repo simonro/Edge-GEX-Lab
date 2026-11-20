@@ -16,9 +16,13 @@ see where option gamma sits without paying for a GEX service.
   and the sign assumption are on the map, not in a footnote.
 - **AI is optional and fenced.** The guidance is a deterministic template. "Explain this map" can ask
   your local `claude` CLI for a narrative; a validator rejects any number or promise not in the data.
-- **Market data you control.** Your own Alpaca keys (the free plan works) plus Cboe's public delayed
-  quotes. REST only, rate capped.
+- **Market data you control.** Your own Alpaca keys (the free plan works). REST only, rate capped.
 - **Free and MIT licensed.** No paid tier.
+
+> **Nov 20, 2026: Cboe now blocks apps from its free delayed quotes.** SPX comes from Alpaca since
+> v1.3.0 (live, from your keys). NDX has no other free source, so its map is unavailable; QQQ tracks the
+> same index. The Futures view is unavailable until it is rebuilt on Alpaca data.
+> See [SPX on Alpaca](#spx-on-alpaca).
 
 **[Quick start](#quick-start)** · **[Releases](https://github.com/simonro/Edge-GEX-Lab/releases)** · **[Privacy](#privacy-and-your-data)**
 
@@ -47,12 +51,13 @@ listens on `127.0.0.1` only.
 ### External services
 
 **Alpaca** (your account, REST only): stock trades and daily bars for the spot price and volume, option
-contracts and option quotes. It receives your API keys and the tickers you open. It never receives an
+contracts and option quotes, SPX included. It receives your API keys and the tickers you open. It never receives an
 order: the app calls no trading endpoint and never opens a websocket.
 
-**Cboe delayed quotes** (public, no account): the SPX and NDX option chains, and open interest for
-every ticker, from `cdn.cboe.com`. It receives the ticker you open. Fetched at most once per ticker per
-60 seconds. Cboe's site terms restrict automated use of these pages: you fetch them yourself, for
+**Cboe delayed quotes** (public, no account): the NDX option chain, and open interest for SPY, QQQ and
+stocks, from `cdn.cboe.com`. It receives the ticker you open. Fetched at most once per ticker per
+60 seconds. Since Nov 20, 2026 Cboe answers these requests with a block page, so NDX is unavailable and
+open interest falls back to Alpaca's, labeled on the map. The app does not try to get around the block. Cboe's site terms restrict automated use of these pages: you fetch them yourself, for
 personal research, at your own risk. Do not redistribute the data.
 
 **Your local `claude` CLI** (optional): only when you press "Explain this map". It receives the
@@ -108,14 +113,13 @@ advice.
 ## Quick start
 
 Requirements: [Python 3.11 or newer](https://www.python.org/downloads/), [Node.js LTS](https://nodejs.org/),
-and an [Alpaca](https://alpaca.markets/) account for its free API keys (SPX and NDX work without them).
+and an [Alpaca](https://alpaca.markets/) account for its free API keys (every map needs them).
 
 **Windows, two steps:** download or clone the repo, then double-click
 
 1. `setup.bat`, once. It installs everything, builds the web page and creates `.env` for your keys.
    Open `.env` and paste your Alpaca key and secret.
-2. `launch.bat`, every time. It opens http://127.0.0.1:8240. Without Alpaca keys it opens on SPX,
-   which needs none.
+2. `launch.bat`, every time. It opens http://127.0.0.1:8240.
 
 **Try it first with no keys and no network:** `launch.bat demo` (or set `GEXLAB_DEMO=1` before
 starting the server) serves synthetic fixtures for SPY, QQQ, SPX, NDX and NVDA. Every screen carries a
@@ -140,7 +144,6 @@ Install Edge GEX Lab on this computer from github.com/simonro/Edge-GEX-Lab. Foll
 exactly. First check that Python 3.11+ and Node.js LTS are installed, and if one is missing, tell me
 instead of installing it. Then run the setup, start the app and confirm http://127.0.0.1:8240 opens.
 Do not add any API keys. Show me where the .env file is so I can paste my own Alpaca keys.
-SPX works without keys.
 ```
 
 Every install starts empty: no saved maps and no history. Open the page, pick a ticker, and the map
@@ -165,7 +168,7 @@ Privacy above), linking to its release notes.
 
 | Variable | Enables |
 |---|---|
-| `APCA_API_KEY_ID`, `APCA_API_SECRET_KEY` | SPY, QQQ and stock maps (Alpaca quotes, spot and volume). SPX and NDX work without them. |
+| `APCA_API_KEY_ID`, `APCA_API_SECRET_KEY` | Every map: SPY, QQQ, SPX and stocks (Alpaca quotes, spot and volume). |
 | `ALPACA_MODE` | `paper` (default) or `live`: which Alpaca account the keys belong to. Market data is the same. |
 | `ALPACA_ENV_FILE` (environment variable, not `.env`) | Optional path to a `.env` file somewhere else that already holds your Alpaca keys, used instead of the `.env` next to this README. Keys set directly as environment variables win over both. |
 | `GEXLAB_PORT` (environment variable, not `.env`) | Port for `launch.bat` and the web dev server's proxy, 8240 by default. Example: `set GEXLAB_PORT=8250` then `launch.bat`. For the manual start, pass the same number to `--port`. |
@@ -183,22 +186,40 @@ Privacy above), linking to its release notes.
 - **Open interest is daily and one session behind** for every tool, because OCC publishes it once a
   day. It comes from Cboe, joined to Alpaca's contracts by OCC symbol; Cboe publishes no date, so the
   date is inferred from the payload time and labeled. If Cboe is unavailable the map falls back to
-  Alpaca open interest and says so.
+  Alpaca open interest and says so. Since Cboe's block (Nov 20, 2026) that is every map, SPX included,
+  and Alpaca's open interest usually runs one session older still (on Nov 20 it carried Nov 18's). The
+  OI date is on the map.
 - **Feeds.** Alpaca OPRA (paid) gives live quotes and the IV is solved from the mid; Alpaca's free
   indicative feed gives a modified quote with its own IV. Alpaca computes no IV for contracts that expire
   today, so on the free feed the app solves those from the indicative mid the same way it does on OPRA.
   Checked side by side against OPRA on SPY and QQQ through a session, the walls matched and the flip
   stayed within 0.25% of spot, but net GEX for today's expiry was off by as much as half. Trust the
-  levels on the free feed more than the bar sizes. SPX and NDX come from Cboe, about 15 minutes delayed. The map labels which one you are looking at.
-- **SPX and NDX before about 09:45 ET.** Cboe's delayed file still carries the prior session's index
-  close until its first live value arrives. The map labels spot "prior close" with Cboe's own time, the
-  gamma sign and distances say they are measured at that close, guidance shows no setups, and the
-  Futures view waits for live data before estimating a basis. The walls and the gamma flip come from
-  open interest by strike, so they still show.
+  levels on the free feed more than the bar sizes. SPX works differently, see [SPX on Alpaca](#spx-on-alpaca).
+  The map labels which feed you are looking at.
 - **Valuation clock.** Time to expiry is measured from the quote time, and from the session close when
   the market is shut, so a weekend map is not distorted.
 
+## SPX on Alpaca
+
+Until Nov 19, 2026 SPX and NDX came from Cboe's free delayed quotes. Cboe now blocks apps from that feed,
+so since v1.3.0 SPX comes from Alpaca, which lists SPX index options (the AM settled monthlies and the
+SPXW weeklies) with the same OCC open interest: 14 of 14 contracts checked matched Cboe exactly.
+
+- **Spot.** Alpaca publishes no SPX level, so it is read from the options by put-call parity: strike +
+  call minus put, the median of the 6 strikes nearest the money at the nearest expiry. It is live, not
+  15 minutes old, and the map labels it "from SPX options (put-call parity)".
+- **IV on the free feed.** Alpaca gives no usable IV for index options, so every IV is solved from the
+  quote mid. Checked against OPRA over 4 rounds on Nov 20, 2026: the same call and put walls every
+  round, net GEX within 3.5% and spot within 1.5 points. The free feed's quotes are widened, so trust
+  the walls and the gamma sign more than the exact bar sizes.
+- **NDX** is not on Alpaca, so its map shows that Cboe blocks it. QQQ tracks the same index.
+- **Keys.** SPX now needs your Alpaca keys, like every other map.
+
 ## Futures view
+
+**Unavailable since Nov 20, 2026:** the basis below comes from Cboe's payload, which is now blocked.
+It will be rebuilt on Alpaca's SPX options. Typing your own futures price still needs an index value
+from the same source, so it is unavailable too.
 
 If you trade /ES or /MNQ, flip the Live Map's **Index | Futures** toggle and every level reads as a
 futures price: the level cards show the futures value large with the index or ETF value underneath,

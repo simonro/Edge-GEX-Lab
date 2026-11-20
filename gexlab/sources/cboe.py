@@ -210,6 +210,11 @@ def _fetch_locked(ticker, symbol, cache, max_age, client, now, deadline, respect
             pool.shutdown(wait=False)
     if status != 200:
         _start_cooldown(ticker, retry_after, _time.time())
+        if status in (403, 307):
+            # 2026-11-20: Cboe put the free delayed quotes behind a Cloudflare bot challenge. Not worked around.
+            raise SourceError(f"Cboe HTTP {status}: since Nov 20, 2026 Cboe blocks apps from its free delayed "
+                              f"quotes. {ticker} has no other free source (Alpaca lists no {ticker} options); "
+                              "QQQ tracks the same index.", status=status)
         raise SourceError(f"Cboe HTTP {status}", status=status)
     held = cache.read_bytes() if cache.is_file() else None
     if held is not None and _older(body, held):

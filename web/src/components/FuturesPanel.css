@@ -121,3 +121,11 @@
 .fut-aside {
   color: var(--amber);
 }
+
+/* SPX/NDX live spot estimate from SPY/QQQ: same weight as the futures tag. */
+.live-tag {
+  margin-left: 6px;
+  font-size: 0.85em;
+  color: var(--green);
+  letter-spacing: 0.02em;
+}

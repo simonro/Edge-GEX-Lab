@@ -3,6 +3,7 @@ import type { GexMap, StrikeRow } from "../api/types";
 import { distText, gex, int, px, price as fmtPrice, spotRef, strike as fmtStrike } from "../lib/format";
 import { futPx, toFut, type FutConv } from "../lib/futures";
 import { useMeasure } from "../lib/hooks";
+import { spotOf } from "../lib/live";
 
 export interface ProfileLevels {
   call_wall: number | null;
@@ -93,7 +94,7 @@ export default function GexProfile({ map, levels, rangePct, showCurve, frozen, h
     return () => window.clearTimeout(t);
   }, [growKey]);
 
-  const spot = map.spot.price;
+  const spot = spotOf(map);           // SPX/NDX: the live estimate from SPY/QQQ when there is one
   const W = Math.max(320, size.width);
   const H = height;
   const L = present ? 84 : 62; // strike labels live left of L

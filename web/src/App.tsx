@@ -93,10 +93,9 @@ export default function App() {
   const demo = MOCK || health.data?.demo === true;
   const [present, togglePresent] = usePresentMode();
 
-  // No ticker in the URL: SPY, or SPX when the API has no Alpaca keys (SPX and NDX need none). The live map
-  // waits for the health answer so a keyless install never opens on a map it cannot load.
-  const keyless = health.data?.keys_configured === false;
-  const ticker = (params.get("ticker") || (keyless ? "SPX" : "SPY")).toUpperCase();
+  // No ticker in the URL: SPY. Since Cboe blocked its free feed (2026-11-20) every map needs Alpaca keys, so a
+  // keyless install opens on SPY and its error says where the keys go.
+  const ticker = (params.get("ticker") || "SPY").toUpperCase();
   const awaitingDefault = !params.get("ticker") && health.loading;
   const route = NAV.some((n) => n.path === path) ? path : "/live";
 

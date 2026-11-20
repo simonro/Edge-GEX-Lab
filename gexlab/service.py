@@ -139,7 +139,7 @@ def fetch_chain(ticker: str, priority: str = "low", now: datetime | None = None,
         else:
             src = AlpacaSource(priority=priority, who="recorder" if recorder else "api")
             overlay = ((lambda t, cs, at, cl, h: cboe.apply_oi(t, cs, at, cl, h, respect_cooldown=not recorder))
-                       if config.OI_SOURCE == "cboe" else None)
+                       if config.OI_SOURCE == "cboe" and ticker not in config.ALPACA_INDEX else None)
             ch = src.fetch_chain(ticker, now, cal, strict=strict, oi_overlay=overlay)
     ch.contracts = G.finalize(ch.contracts, ch.spot.price, ch.valuation, cal)   # T from the valuation clock
     return ch
@@ -186,13 +186,13 @@ def cached_chain(ticker: str) -> tuple[Chain, _Entry, bool]:
 def fmt_px(x: float | None, ticker: str) -> str:
     if x is None:
         return "n/a"
-    if ticker in config.CBOE_TICKERS:
+    if ticker in config.INDEX_TICKERS:
         return f"{math.floor(x + 0.5):,}"  # index points: whole numbers, halves up like the web
     return f"{x:.2f}".rstrip("0").rstrip(".") if x != int(x) else f"{int(x)}"
 
 
 def fmt_spot(x: float, ticker: str = "") -> str:
-    if ticker in config.CBOE_TICKERS:
+    if ticker in config.INDEX_TICKERS:
         return f"{math.floor(x + 0.5):,}"  # index points: whole numbers, halves up
     return f"{x:,.2f}"
 
@@ -204,11 +204,14 @@ def fmt_date_short(iso: str | None) -> str | None:
     return f"{d.strftime('%b')} {d.day}"
 
 
-def lead_sentence(ticker: str, spot: float, lv: G.Levels, coverage_pct: float, prior_close: bool = False) -> str:
+def lead_sentence(ticker: str, spot: float, lv: G.Levels, coverage_pct: float, prior_close: bool = False,
+                  live_etf: str | None = None) -> str:
     """Plain-English, data-derived, descriptive only (no signal words). One line at 1920 px:
     the coverage rule detail lives in the coverage panel and the method drawer, not here.
-    Vocabulary: always "gamma flip", never "flip" alone or "zero gamma"."""
+    Vocabulary: always "gamma flip", never "flip" alone or "zero gamma".
+    live_etf: spot is a live estimate from that ETF, and lv carries the gamma flip and regime read at it."""
     s = (f"{ticker} at its prior close ({fmt_spot(spot, ticker)})" if prior_close
+         else f"{ticker} near {fmt_spot(spot, ticker)} (live, from {live_etf})" if live_etf
          else f"{ticker} at {fmt_spot(spot, ticker)}")
     parts = []
     if lv.nearest_zero_gamma is not None:
@@ -322,6 +325,8 @@ def build_map(ticker: str, expiries: list[str] | None, signed: bool) -> dict:
     call_tot = sum(c.gex for c in sel if c.valid and c.type == "call")
     put_tot = sum(c.gex for c in sel if c.valid and c.type == "put")
     put_tot_out = _signed(put_tot, signed)
+    live, lead_lv, lead_spot = None, lv, spot
+
 
     kind = chain.feed
     val_label = None
@@ -376,7 +381,7 @@ def build_map(ticker: str, expiries: list[str] | None, signed: bool) -> dict:
     if slot.error and stale:
         warnings.append("Last refresh failed; showing the previous successful chain.")
 
-    return {
+    out = {
         "ticker": ticker,
         "as_of": iso_z(chain.as_of),
         "model_version": config.MODEL_VERSION,
@@ -420,10 +425,13 @@ def build_map(ticker: str, expiries: list[str] | None, signed: bool) -> dict:
              "oi_source": chain.oi_source, "expiries": sorted({c.expiry.isoformat() for c in chain.contracts}),
              "excluded": None}
             if config.is_demo() else frozen_today(ticker, ny_today(now))),
-        "lead": (lead_sentence(ticker, spot, lv, pct, chain.spot.basis == "prior_close") if quotes["usable"] else
+        "live_spot": live,
+        "lead": (lead_sentence(ticker, lead_spot, lead_lv, pct, chain.spot.basis == "prior_close",
+                               live_etf=live["etf"] if lead_spot != spot else None) if quotes["usable"] else
                  no_quotes_lead(ticker, spot, quotes, cov, kind, None if config.is_demo() else cal, now, market_open)),
         "warnings": warnings,
     }
+    return out
 
 
 def _oi_source_payload(chain: Chain) -> dict | None:

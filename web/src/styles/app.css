@@ -253,6 +253,15 @@ p {
   font: 500 12px/1 var(--mono);
   color: var(--text);
 }
+/* live map: today's 10:00 capture is missing, late or invalid (the banner in the capture status amber) */
+.update-banner.warn {
+  margin-bottom: 0;
+  border-color: var(--amber-dim);
+  background: rgba(201, 162, 94, 0.06);
+}
+.update-banner.warn b {
+  color: var(--amber);
+}
 .screen {
   display: grid;
   gap: var(--gap);

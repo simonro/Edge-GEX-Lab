@@ -9,6 +9,7 @@ import { CURRENT_GATE, gateMin } from "../lib/gate";
 import FuturesPanel from "../components/FuturesPanel";
 import { FUTURES_TICKERS, convOf, futPx, toFut, type FutConv, type StoredOverride } from "../lib/futures";
 import { useAsync, useNow } from "../lib/hooks";
+import { liveOf, spotOf } from "../lib/live";
 
 const REFRESH_S = 60;
 const RANGES = [2, 5, 10] as const;
@@ -197,7 +198,7 @@ export default function LiveMap({ initialTicker, onTicker }: { initialTicker: st
   const futQ = useAsync<FuturesView>(() => api.futures(ticker, { overrideBasis: ov?.basis }), [ticker, map.data, ov?.basis], futOn && m !== null);
   const futData = futOn && futQ.data && futQ.data.ticker === ticker ? futQ.data : null;
   const conv = futOn ? convOf(futData) : null;
-  const exact = m ? { spot: m.spot.price, flips: m.levels.zero_gamma } : null;
+  const exact = m ? { spot: spotOf(m), flips: m.levels.zero_gamma } : null;   // guidance reads at the live spot too
   const setOverride = (o: StoredOverride | null) =>
     setOverrides((cur) => {
       const k = FUT_INDEX[ticker] ?? ticker;
@@ -541,6 +542,16 @@ export default function LiveMap({ initialTicker, onTicker }: { initialTicker: st
         )}
       </div>
 
+      {/* today's 10:00 capture is missing, late or invalid (hidden in Present mode, like the Notes panel) */}
+      {m?.capture_alert && !present && (
+        <div className="update-banner warn" role="status">
+          <span>
+            <b>10:00 capture {m.capture_alert.kind}.</b> {m.capture_alert.text} Details in{" "}
+            <a href={`#/health?ticker=${ticker}`}>Capture health</a>.
+          </span>
+        </div>
+      )}
+
       {fatal ? (
         <ErrorState error={fatal} onRetry={retryAll} what={`the ${ticker} map`} />
       ) : noExpiries ? (
@@ -773,27 +784,51 @@ function LevelsPanel({
       </Panel>
     );
   }
-  const S = m.spot.price;
+  // SPX/NDX: Cboe's value runs about 15 minutes behind, so spot, the sign, net GEX and every distance are read at the
+  // live estimate from SPY/QQQ when there is one. The walls and flips are strikes and crossings, not moved.
+  const live = liveOf(m);
+  const S = spotOf(m);
   const t = m.ticker;
-  const reg = m.levels.regime;
+  const reg = live ? live.regime : m.levels.regime;
   const ft = m.frozen_today;
   const shared = levels.call_wall !== null && levels.call_wall === levels.put_wall;
   const prior = m.spot.basis === "prior_close";
   const ref = spotRef(m.spot.basis);
   const nowNote = (cur: number | null, fmt: (v: number | null) => string) => (frozen ? <>Now {fmt(cur)}.</> : null);
+  const cboeAt = `Cboe ${px(m.spot.price, t)} at ${nyTime(m.live_spot?.delayed_time ?? m.spot.ts, true)}`;
+  const liveOff = !live && m.live_spot && !prior && m.feed.market_open ? m.live_spot : null;
 
   const tiles: Kpi[] = [
     {
       key: "spot",
-      label: "Spot",
+      label: live ? (
+        <>
+          Spot <span className="live-tag">live est.</span>
+        </>
+      ) : (
+        "Spot"
+      ),
       value: px(S, m.ticker),
-      sub: prior
-        ? `${t} prior close (Cboe, ${nyDay(m.spot.ts)} ${nyTime(m.spot.ts, true)} ET). Cboe's first live value arrives about 09:45 ET.`
-        : m.spot.basis === "regular_close"
-          ? m.spot.source === "cboe"
-            ? "Regular close (Cboe)"
-            : "Regular close"
-          : `${m.spot.source.replace("alpaca_", "").toUpperCase()} at ${nyTime(m.spot.ts, true)}`,
+      sub: live
+        ? `from ${live.etf} at ${nyTime(live.ts, true)} · ${cboeAt} (${signedNum(live.diff ?? 0, 0)})`
+        : prior
+          ? `${t} prior close (Cboe, ${nyDay(m.spot.ts)} ${nyTime(m.spot.ts, true)} ET). Cboe's first live value arrives about 09:45 ET.`
+          : m.spot.basis === "regular_close"
+            ? m.spot.source === "cboe"
+              ? "Regular close (Cboe)"
+              : m.spot.source === "alpaca_parity"
+                ? `Close, from ${t} options (put-call parity)`
+                : "Regular close"
+            : m.spot.basis === "parity"
+              ? `From ${t} options (put-call parity) at ${nyTime(m.spot.ts, true)}`
+              : liveOff
+              ? `${cboeAt}, about 15 min delayed. No live estimate: ${liveOff.reason}`
+              : `${m.spot.source.replace("alpaca_", "").toUpperCase()} at ${nyTime(m.spot.ts, true)}`,
+      def: live
+        ? `Last ${live.etf} trade x the ${t}/${live.etf} ratio, priced at Cboe's ${t} value and the ${live.etf} trade of that same second. An estimate, not an index quote: Cboe's own value runs about 15 minutes behind.`
+        : m.spot.source === "alpaca_parity"
+          ? `Alpaca publishes no ${t} level, so it is read from the options: strike + call - put, the median of the 6 strikes nearest the money at the nearest expiry. Live, from the same quotes as the map.`
+          : undefined,
     },
   ];
   if (shared) {
@@ -853,6 +888,10 @@ function LevelsPanel({
   }
   const callAbs = Math.abs(m.totals.call_gex);
   const putAbs = Math.abs(m.totals.put_gex);
+  // The flip nearest the live price (it differs from the map's only when there are several crossings).
+  const zgNow = live && !frozen ? (live.nearest_zero_gamma ?? null) : levels.nearest_zero_gamma;
+  const atFlip = !!live?.at_flip;
+  const tot = live ? { call_gex: live.call_gex ?? 0, put_gex: live.put_gex ?? 0, net_gex: live.net_gex ?? 0 } : m.totals;
   if (m.signed) {
     tiles.push(
       {
@@ -865,9 +904,9 @@ function LevelsPanel({
             {!frozen && m.levels.zero_gamma.length > 1 && <span style={{ color: "var(--muted-2)" }}>nearest of {m.levels.zero_gamma.length}</span>}
           </>
         ),
-        value: levels.nearest_zero_gamma === null ? "None" : px(levels.nearest_zero_gamma, m.ticker),
+        value: zgNow === null ? "None" : px(zgNow, m.ticker),
         valueClass: "p",
-        sub: levels.nearest_zero_gamma === null ? "no crossing within 10%" : distText(levels.nearest_zero_gamma, S, t, ref),
+        sub: zgNow === null ? "no crossing within 10%" : distText(zgNow, S, t, ref),
         def: (
           <>
             Where modeled net GEX crosses zero. {nowNote(m.levels.nearest_zero_gamma, (v) => (v === null ? "none" : px(v, m.ticker)))}
@@ -877,22 +916,24 @@ function LevelsPanel({
       {
         key: "sign",
         label: "Modeled gamma sign",
-        value: reg === "positive" ? "Positive" : reg === "negative" ? "Negative" : "Neutral",
+        value: atFlip ? "At the flip" : reg === "positive" ? "Positive" : reg === "negative" ? "Negative" : "Neutral",
         valueClass: "word",
-        valueStyle: { color: reg === "positive" ? "var(--green)" : reg === "negative" ? "var(--purple-2)" : "var(--text)" },
-        sub: prior ? "at the prior close" : "at current spot",
-        def: "Positive does not mean bullish.",
+        valueStyle: { color: atFlip ? "var(--text)" : reg === "positive" ? "var(--green)" : reg === "negative" ? "var(--purple-2)" : "var(--text)" },
+        sub: prior ? "at the prior close" : live ? `at the live spot (from ${live.etf})` : "at current spot",
+        def: atFlip
+          ? `The live estimate sits within ${px(live?.flip_band ?? 0, t)} points of the gamma flip, closer than the estimate can settle. Positive does not mean bullish.`
+          : "Positive does not mean bullish.",
       },
       {
         key: "net",
         label: "Net GEX",
-        value: gex(m.totals.net_gex, { sign: true }),
+        value: gex(tot.net_gex, { sign: true }),
         sub: (
           <>
-            calls <span className="g">{gex(m.totals.call_gex)}</span> / puts <span className="p">{gex(m.totals.put_gex, { sign: true })}</span>
+            calls <span className="g">{gex(tot.call_gex)}</span> / puts <span className="p">{gex(tot.put_gex, { sign: true })}</span>
           </>
         ),
-        def: GEX_UNITS,
+        def: live ? `${GEX_UNITS}, at the live spot` : GEX_UNITS,
       },
     );
     if (m.dex) tiles.push(dexTile(m.dex, onExplain));
@@ -916,7 +957,7 @@ function LevelsPanel({
       cpw: levels.call_wall,
       cw: levels.call_wall,
       pw: levels.put_wall,
-      zg: levels.nearest_zero_gamma,
+      zg: zgNow,
     };
     for (const k of tiles) {
       if (!(k.key in src) || src[k.key] === null) continue;
@@ -1317,6 +1358,8 @@ function MethodBody({ m, ticker }: { m: GexMap | null; ticker: string }) {
                 ? m.spot.source === "cboe"
                   ? `${price(m.spot.price)}, the regular-session close from the Cboe delayed payload${m.feed.data_ts ? ` stamped ${nyWeekday(m.feed.data_ts)} ${nyTime(m.feed.data_ts, true)} ET` : ""}`
                   : `${price(m.spot.price)}, the regular-session close (${m.spot.source}); extended-hours prints are ignored`
+                : m.spot.source === "alpaca_parity"
+                ? `${price(m.spot.price)} from put-call parity on ${m.ticker} options at ${nyTime(m.spot.ts, true)} ET (Alpaca publishes no index level)`
                 : `${price(m.spot.price)} from ${m.spot.source} at ${nyTime(m.spot.ts, true)} ET`}
             </dd>
             <dt>Valued at</dt>

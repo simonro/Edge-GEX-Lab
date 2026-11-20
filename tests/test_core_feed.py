@@ -183,7 +183,7 @@ def test_no_keys_message_points_at_env(tmp_path, monkeypatch):
     monkeypatch.delenv("APCA_API_SECRET_KEY", raising=False)
     monkeypatch.setenv("ALPACA_ENV_FILE", str(tmp_path / "missing.env"))
     assert A.load_credentials() is None
-    with pytest.raises(SourceError, match=r"APCA_API_KEY_ID and APCA_API_SECRET_KEY in \.env .*SPX and NDX work without keys"):
+    with pytest.raises(SourceError, match=r"APCA_API_KEY_ID and APCA_API_SECRET_KEY in .env .*free Alpaca plan works"):
         A.AlpacaSource()
 
 

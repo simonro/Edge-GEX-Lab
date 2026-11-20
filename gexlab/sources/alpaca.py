@@ -37,6 +37,12 @@ Valuation clock (calendar.valuation_time): in regular hours the spot is the late
   indicative IV is computed on the vendor's own wall clock (verified 2026-10-17: on a Saturday
   it matches a solve with T from Saturday, not from Friday's close), so outside market hours
   it overstates IV and is labeled.
+
+Index options (config.ALPACA_INDEX, SPX since 2026-11-20): Alpaca carries SPX and SPXW contracts with OCC
+  open interest but no index level and no index bars. Snapshots are keyed by root, so each root is asked
+  for by name and merged. Spot is the put-call parity forward of the nearest expiry with enough live pairs
+  (parity_spot), from the same snapshots the chain uses, so quotes and spot share one clock. On the free
+  feed every IV is solved from the quote mid (the vendor gives no usable index IV), the same solve OPRA gets.
 """
 from __future__ import annotations
 
@@ -131,6 +137,52 @@ def mid_usable(bid: float | None, ask: float | None) -> bool:
     return (ask - bid) / mid <= config.WIDE_SPREAD_FRAC
 
 
+def parity_spot(snaps: dict, as_of: datetime, cal: TradingCalendar | None,
+                max_age_s: float | None) -> dict | None:
+    """The index level from put-call parity, for index options with no published index level (SPX on Alpaca).
+
+    Per expiry (nearest first), the strikes with both legs' mids usable give forwards F = K + e^(rT) (C - P);
+    the INDEX_PARITY_PAIRS with the smallest |C - P| (nearest the money) are kept and their median is the
+    level. An expiry is skipped when fewer than INDEX_PARITY_MIN_PAIRS pairs qualify or their forwards spread
+    over INDEX_PARITY_MAX_SPREAD of price. max_age_s drops quotes older than that before as_of (None: any age,
+    the market-closed case). The forward of the nearest expiry is the spot to within the carry over at most a
+    weekend (about 1.5 SPX points), which is also the price every IV is solved against.
+    Returns {price, ts, pairs, expiry, spread} or None."""
+    groups: dict[tuple, dict] = {}
+    for sym, snap in snaps.items():
+        try:
+            occ = parse_occ(sym)
+        except ValueError:
+            continue
+        q = (snap or {}).get("latestQuote") or {}
+        bid, ask, ts = q.get("bp"), q.get("ap"), parse_ts(q.get("t"))
+        if not mid_usable(bid, ask) or ts is None or ts > as_of + timedelta(seconds=config.CLOCK_SKEW_S):
+            continue
+        if max_age_s is not None and (as_of - ts).total_seconds() > max_age_s:
+            continue
+        groups.setdefault((occ.expiry, occ.root), {}).setdefault(occ.strike, {})[occ.type[0].upper()] = \
+            (0.5 * (bid + ask), ts)
+    for (expiry, root) in sorted(groups):
+        settlement = config.ROOT_SETTLEMENT.get(root, "PM")
+        T = time_to_expiry(as_of, expiry, settlement, cal)
+        if T <= 0:
+            continue
+        growth = math.exp(config.FUTURES_RATE * T)
+        pairs = sorted((abs(v["C"][0] - v["P"][0]), k + growth * (v["C"][0] - v["P"][0]), max(v["C"][1], v["P"][1]))
+                       for k, v in groups[(expiry, root)].items() if "C" in v and "P" in v)
+        top = pairs[:config.INDEX_PARITY_PAIRS]
+        if len(top) < config.INDEX_PARITY_MIN_PAIRS:
+            continue
+        fwd = sorted(f for _, f, _ in top)
+        mid_f = fwd[len(fwd) // 2] if len(fwd) % 2 else 0.5 * (fwd[len(fwd) // 2 - 1] + fwd[len(fwd) // 2])
+        spread = fwd[-1] - fwd[0]
+        if spread > config.INDEX_PARITY_MAX_SPREAD * mid_f:
+            continue
+        return {"price": round(mid_f, 2), "ts": max(t for _, _, t in top), "pairs": len(top),
+                "expiry": expiry.isoformat(), "spread": round(spread, 2)}
+    return None
+
+
 def pair_iv_from_otm(contracts: list[Contract], spot: float) -> int:
     """Use the OTM member's IV for both the call and the put at each (root, expiry, strike).
 
@@ -222,7 +274,7 @@ class AlpacaSource:
         self.creds = creds or load_credentials()
         if self.creds is None:
             raise SourceError("Alpaca keys not configured: put APCA_API_KEY_ID and APCA_API_SECRET_KEY in .env "
-                              "(SPX and NDX work without keys)")
+                              "(the free Alpaca plan works; SPX needs them too since Cboe blocked its free feed)")
         self.client = client or httpx.Client(timeout=config.HTTP_TIMEOUT_S)
         self.rate = rate if rate is not None else limiter()
         self.priority, self.who = priority, who
@@ -393,7 +445,21 @@ class AlpacaSource:
     # ------------------------------------------------------------ snapshots
     def snapshots(self, underlying: str, feed: str, gte: date, lte: date, lo: float, hi: float,
                   hasher: Hasher | None = None) -> tuple[int, dict]:
-        """Returns (http_status_of_first_page, {symbol: snapshot}). Paginates fully."""
+        """Returns (http_status_of_first_page, {symbol: snapshot}). Paginates fully. An index underlying
+        (config.ALPACA_INDEX) is asked for once per option root and merged: Alpaca keys snapshots by root."""
+        roots = config.ALPACA_INDEX.get(underlying, {}).get("roots")
+        if not roots:
+            return self._snapshots_one(underlying, feed, gte, lte, lo, hi, hasher)
+        merged: dict = {}
+        for root in roots:
+            status, part = self._snapshots_one(root, feed, gte, lte, lo, hi, hasher)
+            if status != 200:
+                return status, {}
+            merged.update(part)
+        return 200, merged
+
+    def _snapshots_one(self, underlying: str, feed: str, gte: date, lte: date, lo: float, hi: float,
+                       hasher: Hasher | None = None) -> tuple[int, dict]:
         out, token, first_status = {}, None, None
         while True:
             params = {"feed": feed, "limit": config.SNAPSHOTS_PAGE_LIMIT,
@@ -433,7 +499,16 @@ class AlpacaSource:
         warnings: list[str] = []
         in_session = bool(cal is None or cal.market_open(as_of))   # no calendar: the in-session clock
         market_open = bool(cal is not None and cal.market_open(as_of))
-        if in_session:
+        index = config.ALPACA_INDEX.get(ticker)
+        spot: Spot | None = None
+        if index:
+            # No index level on Alpaca: bound the strikes from the ETF, take the spot from parity further down.
+            etf = (self.latest_trade(index["etf"], hasher) if in_session
+                   else self.session_close(index["etf"], valuation_time(cal, as_of), hasher))
+            t_cap = as_of if in_session else valuation_time(cal, as_of)
+            lo = etf.price * index["ratio"][0] * (1 - config.FETCH_STRIKE_BAND)
+            hi = etf.price * index["ratio"][1] * (1 + config.FETCH_STRIKE_BAND)
+        elif in_session:
             spot = self.latest_trade(ticker, hasher)          # regular hours: the latest trade
             t_cap = as_of                                     # an IV solve never looks past now
         else:
@@ -442,7 +517,8 @@ class AlpacaSource:
             t_cap = close
         today = ny_today(as_of)
         gte, lte = today, today + timedelta(days=config.WINDOW_DAYS)
-        lo, hi = spot.price * (1 - config.FETCH_STRIKE_BAND), spot.price * (1 + config.FETCH_STRIKE_BAND)
+        if spot is not None:
+            lo, hi = spot.price * (1 - config.FETCH_STRIKE_BAND), spot.price * (1 + config.FETCH_STRIKE_BAND)
         rows = self.contracts(ticker, gte, lte, lo, hi, hasher)
         rows = [r for r in rows if lo <= float(r["strike_price"]) <= hi]
 
@@ -462,6 +538,17 @@ class AlpacaSource:
             status, indicative = self.snapshots(ticker, "indicative", gte, lte, lo, hi, hasher)
             if status != 200:
                 raise SourceError(f"indicative snapshots HTTP {status}", status=status)
+
+        if index:
+            ps = parity_spot(primary if feed == "opra" else indicative, as_of, cal,
+                             config.INDEX_PARITY_MAX_AGE_S if in_session else None)
+            if ps is None:
+                raise SourceError(f"No {ticker} level: too few live call/put quote pairs to price it from parity "
+                                  "(Alpaca publishes no index level).")
+            spot = Spot(price=ps["price"], ts=ps["ts"], source="alpaca_parity",
+                        basis="parity" if in_session else "regular_close")
+            lo, hi = spot.price * (1 - config.FETCH_STRIKE_BAND), spot.price * (1 + config.FETCH_STRIKE_BAND)
+            rows = [r for r in rows if lo <= float(r["strike_price"]) <= hi]
 
         contracts = [self._to_contract(r) for r in rows]
         contracts = [c for c in contracts if c is not None]
@@ -489,12 +576,20 @@ class AlpacaSource:
             need = [c for c in contracts
                     if not self._apply_opra(c, primary.get(c.symbol), spot.price, t_cap, cal, spot.ts,
                                             max_after_s=after)]
-            if need:
+            if need and not index:    # the free feed carries no usable index IV to fall back to
                 st, indicative = self.snapshots(ticker, "indicative", gte, lte, lo, hi, hasher)
                 if st != 200:
                     warnings.append("Indicative fallback unavailable; contracts with unusable mids are invalid.")
                 for c in need:
                     self._apply_indicative(c, indicative.get(c.symbol), as_of=as_of, age_gate=age_gate)
+        elif index:
+            # The free feed gives no IV for most index options; solve every one from its quote mid, the same
+            # solve as OPRA. Tested against OPRA on 2026-11-20: same walls, net GEX within 3.5%.
+            n_solved = sum(1 for c in contracts
+                           if self._apply_opra(c, indicative.get(c.symbol), spot.price, t_cap, cal, spot.ts,
+                                               max_after_s=after))
+            warnings.append(f"{n_solved} IVs solved from the free feed's quotes, which Alpaca widens; walls and "
+                            "the gamma sign hold up against OPRA, bar sizes and net GEX read a few percent off.")
         else:
             n_same_day = 0
             for c in contracts:
@@ -574,9 +669,11 @@ class AlpacaSource:
             mult = int(float(r.get("multiplier") or r.get("size") or 100))
         except ValueError:
             mult = 100
-        return Contract(symbol=r["symbol"], root=r.get("root_symbol") or occ.root,
+        root = r.get("root_symbol") or occ.root
+        return Contract(symbol=r["symbol"], root=root,
                         expiry=date.fromisoformat(r.get("expiration_date") or occ.expiry.isoformat()),
-                        settlement="PM", strike=float(r.get("strike_price") or occ.strike),
+                        settlement=config.ROOT_SETTLEMENT.get(root, "PM"),   # SPX monthlies settle AM
+                        strike=float(r.get("strike_price") or occ.strike),
                         type=(r.get("type") or occ.type), multiplier=mult, oi=oi,
                         oi_date=r.get("open_interest_date") or None,
                         last_trade_date=r.get("close_price_date") or None)

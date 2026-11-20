@@ -56,7 +56,7 @@ def r2(x: float | None) -> float | None:
 
 def is_index(ticker: str | None) -> bool:
     """SPX and NDX quote in index points: every PRICE is a whole number."""
-    return ticker in config.CBOE_TICKERS
+    return ticker in config.INDEX_TICKERS
 
 
 def rp(x: float | None, whole: bool = False) -> float | None:
