@@ -832,7 +832,7 @@ function LevelsPanel({
       def: live
         ? `Last ${live.etf} trade x the ${t}/${live.etf} ratio, priced at Cboe's ${t} value and the ${live.etf} trade of that same second. An estimate, not an index quote: Cboe's own value runs about 15 minutes behind.`
         : m.spot.source === "alpaca_parity"
-          ? `Alpaca publishes no ${t} level, so it is read from the options: strike + call - put, the median of the 6 strikes nearest the money at the nearest expiry. Live, from the same quotes as the map.`
+          ? `Read from the options (strike + call - put near the money): Alpaca publishes no ${t} level. Live.`
           : undefined,
     },
   ];

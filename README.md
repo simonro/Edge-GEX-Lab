@@ -22,7 +22,7 @@ see where option gamma sits without paying for a GEX service.
 > **Nov 20, 2026: Cboe now blocks apps from its free delayed quotes.** SPX comes from Alpaca since
 > v1.3.0 (live, from your keys). NDX has no other free source, so its map is unavailable; QQQ tracks the
 > same index. The Futures view works for SPX and SPY (/ES) and is unavailable for NDX and QQQ (/NQ).
-> Open interest now comes straight from OCC, the clearing house (v1.3.1).
+> Open interest now comes straight from OCC, the clearing house (v1.3.1, fixed for SPY and QQQ in v1.3.2).
 > See [SPX on Alpaca](#spx-on-alpaca).
 
 **[Quick start](#quick-start)** · **[Releases](https://github.com/simonro/Edge-GEX-Lab/releases)** · **[Privacy](#privacy-and-your-data)**

@@ -132,8 +132,12 @@ def apply_oi(ticker: str, contracts: list[Contract], as_of: datetime, cal: Tradi
         return _alpaca_info(contracts, f"OCC unavailable ({e})")
     occ_oi = parse_series(text)
     matched = [c for c in contracts if c.symbol in occ_oi]
-    if len(matched) < config.OCC_OI_MIN_MATCH * len(contracts):
-        return _alpaca_info(contracts, f"OCC lists {len(matched)} of {len(contracts)} contracts")
+    # Series listed today are not in OCC's prior-session file and carry no open interest yet (2026-11-20: 192 new
+    # SPY strikes, none with Alpaca OI). The match test counts only contracts Alpaca reports open interest for.
+    held = [c for c in contracts if c.oi]
+    held_matched = sum(1 for c in held if c.symbol in occ_oi)
+    if not matched or (held and held_matched < config.OCC_OI_MIN_MATCH * len(held)):
+        return _alpaca_info(contracts, f"OCC lists {held_matched} of the {len(held)} contracts with open interest")
     both = [c for c in matched if c.oi is not None]
     differ = sum(1 for c in both if occ_oi[c.symbol] != c.oi)
     differ_frac = differ / len(both) if both else None

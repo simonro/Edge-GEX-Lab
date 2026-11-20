@@ -75,7 +75,13 @@ def test_early_download_is_dated_one_session_earlier():
 def test_too_few_matches_keeps_alpaca():
     cs = chain() + [contract(f"SPXW261127P0{7000 + i}000", 10) for i in range(20)]
     info = occ.apply_oi("SPX", cs, AS_OF, CAL, fetch=fetch_at(AS_OF))
-    assert info["source"] == "alpaca" and "OCC lists 3 of 23" in info["fallback_reason"]
+    assert info["source"] == "alpaca" and "OCC lists 3 of the 23" in info["fallback_reason"]
+
+
+def test_series_listed_today_do_not_block_the_file():
+    new = [contract(f"SPXW261127P0{7000 + i}000", None) for i in range(20)]   # no OI yet, not in OCC's file
+    info = occ.apply_oi("SPX", chain() + new, AS_OF, CAL, fetch=fetch_at(AS_OF))
+    assert info["source"] == "occ" and info["mixed"] and all(c.oi_source == "alpaca" for c in new)
 
 
 def test_failure_keeps_alpaca_with_the_reason():
