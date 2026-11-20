@@ -17,7 +17,7 @@ from gexlab.engine import voldrift as VD
 from gexlab.engine.calendar import (NY, UTC, TradingCalendar, expiry_kind, iso_z, ny_today,
                                     settlement_dt, utc_now, valuation_label)
 from gexlab.models import Chain, Contract, Spot
-from gexlab.sources import cboe
+from gexlab.sources import cboe, occ
 from gexlab.sources.alpaca import FEED_STATE, AlpacaSource, load_credentials
 from gexlab.sources.base import SourceError, limiter
 
@@ -138,8 +138,12 @@ def fetch_chain(ticker: str, priority: str = "low", now: datetime | None = None,
                                   respect_cooldown=not recorder)
         else:
             src = AlpacaSource(priority=priority, who="recorder" if recorder else "api")
-            overlay = ((lambda t, cs, at, cl, h: cboe.apply_oi(t, cs, at, cl, h, respect_cooldown=not recorder))
-                       if config.OI_SOURCE == "cboe" and ticker not in config.ALPACA_INDEX else None)
+            if config.OI_SOURCE == "occ":
+                overlay = occ.apply_oi
+            elif config.OI_SOURCE == "cboe" and ticker not in config.ALPACA_INDEX:
+                overlay = (lambda t, cs, at, cl, h: cboe.apply_oi(t, cs, at, cl, h, respect_cooldown=not recorder))
+            else:
+                overlay = None
             ch = src.fetch_chain(ticker, now, cal, strict=strict, oi_overlay=overlay)
     ch.contracts = G.finalize(ch.contracts, ch.spot.price, ch.valuation, cal)   # T from the valuation clock
     return ch

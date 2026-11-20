@@ -22,6 +22,7 @@ see where option gamma sits without paying for a GEX service.
 > **Nov 20, 2026: Cboe now blocks apps from its free delayed quotes.** SPX comes from Alpaca since
 > v1.3.0 (live, from your keys). NDX has no other free source, so its map is unavailable; QQQ tracks the
 > same index. The Futures view works for SPX and SPY (/ES) and is unavailable for NDX and QQQ (/NQ).
+> Open interest now comes straight from OCC, the clearing house (v1.3.1).
 > See [SPX on Alpaca](#spx-on-alpaca).
 
 **[Quick start](#quick-start)** · **[Releases](https://github.com/simonro/Edge-GEX-Lab/releases)** · **[Privacy](#privacy-and-your-data)**
@@ -54,10 +55,15 @@ listens on `127.0.0.1` only.
 contracts and option quotes, SPX included. It receives your API keys and the tickers you open. It never receives an
 order: the app calls no trading endpoint and never opens a websocket.
 
-**Cboe delayed quotes** (public, no account): the NDX option chain, and open interest for SPY, QQQ and
-stocks, from `cdn.cboe.com`. It receives the ticker you open. Fetched at most once per ticker per
-60 seconds. Since Nov 20, 2026 Cboe answers these requests with a block page, so NDX is unavailable and
-open interest falls back to Alpaca's, labeled on the map. The app does not try to get around the block. Cboe's site terms restrict automated use of these pages: you fetch them yourself, for
+**OCC** (the options clearing house, public, no account): open interest by contract for every map,
+from `marketdata.theocc.com`, the script address OCC documents for its reports. It receives the ticker
+you open and the app's name and version. Downloaded at most once per ticker per 30 minutes. OCC's terms
+allow no commercial use; you download it yourself, for personal research. If OCC is unavailable the
+map falls back to Alpaca open interest and says so.
+
+**Cboe delayed quotes** (public, no account): the NDX option chain, from `cdn.cboe.com`. It receives the
+ticker you open. Since Nov 20, 2026 Cboe answers these requests with a block page, so NDX is
+unavailable. The app does not try to get around the block. Cboe's site terms restrict automated use of these pages: you fetch them yourself, for
 personal research, at your own risk. Do not redistribute the data.
 
 **Your local `claude` CLI** (optional): only when you press "Explain this map". It receives the
@@ -184,11 +190,11 @@ Privacy above), linking to its release notes.
 - **The sign is an assumption.** Calls count as positive gamma and puts as negative (dealers long
   calls, short puts). Real positioning is not public; the unsigned view drops the assumption.
 - **Open interest is daily and one session behind** for every tool, because OCC publishes it once a
-  day. It comes from Cboe, joined to Alpaca's contracts by OCC symbol; Cboe publishes no date, so the
-  date is inferred from the payload time and labeled. If Cboe is unavailable the map falls back to
-  Alpaca open interest and says so. Since Cboe's block (Nov 20, 2026) that is every map, SPX included,
-  and Alpaca's open interest usually runs one session older still (on Nov 20 it carried Nov 18's). The
-  OI date is on the map.
+  day. Since v1.3.1 it comes straight from OCC, joined to Alpaca's contracts by OCC symbol (before, from
+  Cboe's payload, which now blocks apps). OCC prints no date, so the date is inferred: Alpaca's when the
+  numbers match Alpaca's, otherwise the session before the download day, and one session earlier for a
+  download before 07:00 ET. If OCC is unavailable the map falls back to Alpaca open interest, which
+  usually runs one session older still, and says so. The OI date is on the map.
 - **Feeds.** Alpaca OPRA (paid) gives live quotes and the IV is solved from the mid; Alpaca's free
   indicative feed gives a modified quote with its own IV. Alpaca computes no IV for contracts that expire
   today, so on the free feed the app solves those from the indicative mid the same way it does on OPRA.

@@ -199,7 +199,7 @@ export interface Dex {
 }
 
 export interface OiSource {
-  kind: "cboe" | "alpaca" | null;
+  kind: "occ" | "cboe" | "alpaca" | null;
   label: string | null;
   /** inferred: Cboe date inferred as the prior session; matches_alpaca: Cboe numbers equal Alpaca's dated OI; reported: Alpaca. */
   basis: "inferred" | "matches_alpaca" | "reported" | null;

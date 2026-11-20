@@ -558,9 +558,11 @@ class AlpacaSource:
             from gexlab.sources.cboe import alpaca_only
             oi_info = alpaca_only(contracts)
         if oi_info.get("fallback_reason"):
-            warnings.append(f"{oi_info['label']}: Cboe open interest not used ({oi_info['fallback_reason']}).")
-        elif oi_info.get("source") == "cboe" and oi_info.get("matched", 0) < oi_info.get("total", 0):
-            warnings.append(f"{oi_info['total'] - oi_info['matched']} contracts are not in the Cboe payload and "
+            vendor = "OCC" if config.OI_SOURCE == "occ" else "Cboe"
+            warnings.append(f"{oi_info['label']}: {vendor} open interest not used ({oi_info['fallback_reason']}).")
+        elif oi_info.get("source") in ("cboe", "occ") and oi_info.get("matched", 0) < oi_info.get("total", 0):
+            vendor = "OCC" if oi_info["source"] == "occ" else "Cboe"
+            warnings.append(f"{oi_info['total'] - oi_info['matched']} contracts are not in the {vendor} file and "
                             "keep Alpaca open interest.")
         oi_ok, oi_counts = decode_null_oi(contracts)
         if not oi_ok:

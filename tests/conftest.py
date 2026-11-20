@@ -25,6 +25,7 @@ def _index_source(request, monkeypatch):
         return
     monkeypatch.setattr(gconfig, "ALPACA_INDEX", {})
     monkeypatch.setattr(gconfig, "CBOE_TICKERS", {"SPX", "NDX"})
+    monkeypatch.setattr(gconfig, "OI_SOURCE", "cboe")      # their OI overlay tests are Cboe's; OCC has its own
 
 
 def exchange_cal(start=date(2026, 9, 1), end=date(2026, 11, 30), closes=None):

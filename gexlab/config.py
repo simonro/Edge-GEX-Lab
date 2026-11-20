@@ -12,7 +12,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 
 # ---------------------------------------------------------------- identity
-APP_VERSION = "1.3.0"            # The public release this build is. Bump it before tagging a release: the update check
+APP_VERSION = "1.3.1"            # The public release this build is. Bump it before tagging a release: the update check
                                  # (gexlab/update_check.py) compares it with GitHub's latest release tag.
 UPDATE_REPO = "simonro/Edge-GEX-Lab"  # Where the update check looks for releases (the public repo).
 UPDATE_EVERY_H = 24              # At most one update check a day; the answer is cached in CACHE_DIR.
@@ -116,10 +116,18 @@ CBOE_FIRST_QUOTES_MIN = 20       # Minutes after the open by which the delayed p
                                  # (2026-10-20 to 10-23: the 09:45 payload was stamped 09:42 to 09:44 ET, about 09:27
                                  # market time, and had none; by 09:48 SPX was usable).
 CBOE_LOCK_TIMEOUT_S = 120        # Max wait for the cross-process Cboe cache lock (a 13 MB fetch can take a while).
-OI_SOURCE = "cboe"               # Open interest for Alpaca-quoted tickers (SPY, QQQ, stocks): "cboe" or "alpaca".
+OI_SOURCE = os.getenv("GEXLAB_OI_SOURCE", "occ").strip().lower()
+                                 # Open interest for Alpaca-quoted tickers (SPY, QQQ, SPX, stocks): "occ" (since
+                                 # 2026-11-20, see sources/occ.py), "cboe" (before; Cboe now blocks apps) or "alpaca".
                                  # Verified 2026-10-19 11:50 ET: Alpaca still served OI dated Thu Oct 15 for QQQ Oct 19
                                  # (calls 50,757 / puts 73,657 at strikes 700 to 750) while Cboe carried Friday's
                                  # positioning (157,975 / 141,447). Quotes, spot and IV stay on Alpaca; only OI moves.
+OCC_SERIES_URL = "https://marketdata.theocc.com/series-search"  # OCC's documented batch URL (symbolType=U&symbol=X).
+OCC_CACHE_S = 1800               # OCC open interest changes once a day: one download per ticker per 30 min, same NY day.
+OCC_FAIL_COOLDOWN_S = 300        # After a failed OCC download, wait this long before asking again (the map keeps Alpaca OI).
+OCC_TIMEOUT_S = 20               # SPX's file is about 1.4 MB, SPY's 0.4 MB (1.5 s on 2026-11-20).
+OCC_OI_MIN_MATCH = 0.90          # OCC must list at least 90% of the Alpaca contracts, or the chain keeps Alpaca OI, labeled.
+OCC_FRESH_AFTER = time(7, 0)     # A download before 07:00 ET may still be the older overnight file: dated one session earlier.
 CBOE_OI_CACHE_S = 600            # OI changes once a day, so an OI-only payload is reused for 10 min (>= the 60 s floor).
 CBOE_OI_MIN_MATCH = 0.90         # Cboe must list at least 90% of the Alpaca contracts (by OCC symbol) or the whole
                                  # chain falls back to Alpaca OI, labeled. Below that the payload is not the same chain.

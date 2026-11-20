@@ -77,6 +77,11 @@ function oiSourceText(m: GexMap): string {
   const o = m.oi_source;
   if (!o || !o.label) return "Synthetic fixture.";
   const alp = o.alpaca_oi_date ? dayShort(o.alpaca_oi_date) : null;
+  if (o.kind === "occ") {
+    const head = `${o.label}. Quotes, spot and IV come from Alpaca; open interest comes from OCC, the options clearing house, joined by OCC symbol (${o.matched ?? "?"} of ${o.total ?? "?"} contracts).`;
+    if (o.basis === "matches_alpaca") return `${head} OCC's numbers match Alpaca's, so they carry Alpaca's date${alp ? ` (${alp})` : ""}.`;
+    return `${head} OCC prints no OI date; its numbers differ from Alpaca's${alp ? ` (dated ${alp})` : ""}, so it is read as the newer file and dated the most recent completed session before the download's day.`;
+  }
   if (o.kind === "cboe" && m.feed.kind === "cboe_delayed")
     return `${o.label}. The whole chain comes from Cboe's delayed payload, which does not publish an OI date; it is shown as the session before the payload's day.`;
   if (o.kind === "cboe") {
@@ -84,7 +89,7 @@ function oiSourceText(m: GexMap): string {
     if (o.basis === "matches_alpaca") return `${head} Cboe's numbers match Alpaca's, so they carry Alpaca's date${alp ? ` (${alp})` : ""}.`;
     return `${head} Cboe publishes no OI date; its numbers differ from Alpaca's${alp ? ` (dated ${alp})` : ""}, so it is read as the newer file and dated the most recent completed session before the payload's day.`;
   }
-  return `${o.label}. Open interest from Alpaca's contracts endpoint, with the date Alpaca reports.${o.fallback_reason ? ` Cboe open interest was not used: ${o.fallback_reason}.` : ""}`;
+  return `${o.label}. Open interest from Alpaca's contracts endpoint, with the date Alpaca reports.${o.fallback_reason ? ` The fresher open interest file was not used: ${o.fallback_reason}.` : ""}`;
 }
 
 // Index or Futures prices: remembered per browser. Storage can be blocked, so every access is guarded.

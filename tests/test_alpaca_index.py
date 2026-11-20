@@ -5,6 +5,7 @@ import httpx
 import pytest
 
 from gexlab import config, service
+from gexlab.sources import occ
 from gexlab.engine.bsm import call_price, put_price
 from gexlab.engine.calendar import time_to_expiry
 from gexlab.models import Chain, Spot
@@ -176,7 +177,7 @@ def test_service_routes_spx_to_alpaca(monkeypatch):
     monkeypatch.setattr(service, "AlpacaSource", Stub)
     with pytest.raises(SourceError):
         service.fetch_chain("SPX", now=AS_OF, cal=object())
-    assert seen == {"ticker": "SPX", "overlay": None}          # no Cboe OI overlay for an Alpaca index
+    assert seen == {"ticker": "SPX", "overlay": occ.apply_oi}  # OCC open interest, never Cboe's
 
 
 def test_live_spot_layer_stays_off_for_a_parity_spot():
