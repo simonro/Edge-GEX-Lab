@@ -289,6 +289,7 @@ FUTURES_PARITY_STRIKES = 6       # Strikes used: the 6 nearest the forward with 
 FUTURES_PARITY_MIN = 3           # Fewer usable strike pairs than this: the parity basis is unavailable, never a guess.
 FUTURES_PARITY_WARN_FRAC = 0.0005  # Warn when the per-strike forwards spread more than 0.05% of spot (SPX near 3.9 pt,
                                  # NDX near 15 pt). Measured 2026-10-21 11:59 ET: SPX 0.07 pt, NDX 1.10 pt.
+FUTURES_STRIKE_BAND = 0.03       # Alpaca index (SPX): quarterly AM quotes fetched within 3% of spot for the parity basis.
 FUTURES_TICK = 0.25              # /ES, /MES, /NQ and /MNQ all tick 0.25 index points.
 FUTURES_RATIO_MAX_LAG_S = 90     # SPY/QQQ ratio: the ETF trade used must print within 90 s before the index value's time.
 FUTURES_BASIS_WINDOW_S = 300     # The parity basis shown is the median over the Cboe payloads of the last 5 minutes (by payload

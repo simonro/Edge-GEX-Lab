@@ -21,7 +21,7 @@ see where option gamma sits without paying for a GEX service.
 
 > **Nov 20, 2026: Cboe now blocks apps from its free delayed quotes.** SPX comes from Alpaca since
 > v1.3.0 (live, from your keys). NDX has no other free source, so its map is unavailable; QQQ tracks the
-> same index. The Futures view is unavailable until it is rebuilt on Alpaca data.
+> same index. The Futures view works for SPX and SPY (/ES) and is unavailable for NDX and QQQ (/NQ).
 > See [SPX on Alpaca](#spx-on-alpaca).
 
 **[Quick start](#quick-start)** · **[Releases](https://github.com/simonro/Edge-GEX-Lab/releases)** · **[Privacy](#privacy-and-your-data)**
@@ -217,9 +217,9 @@ SPXW weeklies) with the same OCC open interest: 14 of 14 contracts checked match
 
 ## Futures view
 
-**Unavailable since Nov 20, 2026:** the basis below comes from Cboe's payload, which is now blocked.
-It will be rebuilt on Alpaca's SPX options. Typing your own futures price still needs an index value
-from the same source, so it is unavailable too.
+**Since Nov 20, 2026** (Cboe's block): SPX and SPY take the basis from Alpaca, the live SPX parity spot
+and Alpaca quotes for the AM options that settle the contract, so nothing below is delayed. NDX and QQQ
+(/NQ, /MNQ) are unavailable: they need an NDX value and NDX options, which no free source carries now.
 
 If you trade /ES or /MNQ, flip the Live Map's **Index | Futures** toggle and every level reads as a
 futures price: the level cards show the futures value large with the index or ETF value underneath,

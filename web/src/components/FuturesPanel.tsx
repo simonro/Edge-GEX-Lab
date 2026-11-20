@@ -119,7 +119,7 @@ export default function FuturesPanel({
           {p && p.available ? (
             <>
               F {price(p.forward)} from {p.option_root} {dayShort(p.option_expiry)} AM options (median of {strikes.length} strikes, {k0 !== null && k1 !== null ? `${k0.toLocaleString("en-US")} to ${k1.toLocaleString("en-US")}` : ""}
-              {p.spread !== null ? `, spread ${p.spread.toFixed(2)}` : ""}) minus {f.index} {price(p.index_spot)} from the same Cboe file
+              {p.spread !== null ? `, spread ${p.spread.toFixed(2)}` : ""}) minus {f.index} {price(p.index_spot)} {p.source === "alpaca" ? "from its options by put-call parity (Alpaca, live)" : "from the same Cboe file"}
               {p.index_time ? ` (${nyTime(p.index_time, true)} ET)` : ""}: {signedPts(p.basis_raw)}.
               {p.basis_window && p.basis_window.payloads > 1
                 ? ` Shown: the median over the last ${p.basis_window.payloads} payloads (${Math.round(p.basis_window.seconds / 60)} min), ${signedPts(p.basis)}.`

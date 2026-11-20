@@ -588,6 +588,8 @@ export interface FuturesParity {
   usable_pairs: number;
   spread: number | null;
   option_root: string;
+  /** alpaca: live parity spot and Alpaca quotes (SPX since 2026-11-20); cboe: the delayed Cboe file. */
+  source?: "alpaca" | "cboe";
   option_expiry: string | null;
   settlement: "AM";
   as_of: string | null;

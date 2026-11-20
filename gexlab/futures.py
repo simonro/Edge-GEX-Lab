@@ -159,6 +159,7 @@ class IndexPayload:
     payload_ts: datetime | None    # when Cboe built the file (UTC)
     index_time: datetime | None    # the index value's market-data time (about 15 min before payload_ts)
     pairs_by_expiry: dict[date, dict[float, dict]]   # option_root contracts only, quarterly months only
+    live: bool = False             # Alpaca (2026-11-20): price is the live parity spot and the quotes share its clock
 
 
 _PARSED: dict[str, tuple[tuple, IndexPayload]] = {}
@@ -196,6 +197,25 @@ def parse_payload(index: str, body: bytes) -> IndexPayload:
     return IndexPayload(index, float(data["current_price"]), pts, parse_index_time(data.get("last_trade_time")), pairs)
 
 
+def alpaca_payload(index: str, spot, snaps: dict) -> IndexPayload:
+    """The same shape from Alpaca, for an index Alpaca carries (SPX since Cboe's block on 2026-11-20): the map's live
+    parity spot as the price and index time, and bid/ask pairs of the AM monthly root from Alpaca snapshots
+    ({symbol: snapshot}) for the quarterly expiry. The quotes and the spot are live, so nothing is delayed."""
+    root = config.FUTURES[index]["option_root"]
+    pairs: dict[date, dict[float, dict]] = {}
+    for sym, snap in snaps.items():
+        try:
+            occ = parse_occ(sym)
+        except ValueError:
+            continue
+        q = (snap or {}).get("latestQuote") or {}
+        bid, ask = q.get("bp"), q.get("ap")
+        if occ.root != root or occ.expiry.month not in config.FUTURES_MONTHS or bid is None or ask is None:
+            continue
+        pairs.setdefault(occ.expiry, {}).setdefault(occ.strike, {})[occ.type] = (float(bid), float(ask))
+    return IndexPayload(index, float(spot.price), spot.ts, spot.ts, pairs, live=True)
+
+
 def cached_payload(index: str, body: bytes) -> IndexPayload:
     """parse_payload, reused while the payload is the same file (the SPX file is about 13 MB)."""
     from gexlab.sources.cboe import payload_ts
@@ -227,10 +247,11 @@ def parity_block(c: FuturesContract, p: IndexPayload, now: datetime, cal: Tradin
             "rate": config.FUTURES_RATE, "rate_source": config.FUTURES_RATE_SOURCE, "t_years": None,
             "strikes": [], "usable_pairs": 0, "spread": None, "option_root": config.FUTURES[c.index]["option_root"],
             "option_expiry": exp.isoformat() if exp else None, "settlement": "AM",
+            "source": "alpaca" if p.live else "cboe",
             "as_of": iso_z(p.payload_ts), "index_time": iso_z(p.index_time)}
     if exp is None:
-        base["reason"] = (f"Cboe's payload lists no {base['option_root']} AM options for {c.expiry:%b %d}, "
-                          "the expiry that settles this contract")
+        base["reason"] = (f"{'Alpaca' if p.live else 'Cboe'} lists no {base['option_root']} AM options for "
+                          f"{c.expiry:%b %d}, the expiry that settles this contract")
         return base
     if predates_session(cal, p.index_time, now):
         # Never a basis from today's option quotes over yesterday's index, and never into the smoothing history.
@@ -314,7 +335,9 @@ def etf_ratio(etf: str, p: IndexPayload, trade_at, cal: TradingCalendar | None =
     return {"value": p.price / tr.price, "index_price": p.price, "index_time": iso_z(p.index_time),
             "etf": etf, "etf_price": tr.price, "etf_time": iso_z(tr.ts),
             "lag_s": round((at - tr.ts).total_seconds(), 1) if tr.ts else None, "source": tr.source,
-            "note": (f"{p.index} from Cboe (its {at.astimezone(NY):%H:%M:%S} ET value) over the last {etf} "
+            "note": (f"{p.index} from its options by put-call parity (the {at.astimezone(NY):%H:%M:%S} ET quotes) "
+                     f"over the last {etf} trade at or before that second, both from Alpaca." if p.live else
+                     f"{p.index} from Cboe (its {at.astimezone(NY):%H:%M:%S} ET value) over the last {etf} "
                      f"trade at or before that second (Alpaca). Same instant, so the 15 minute delay drops out.")}
 
 
@@ -328,9 +351,10 @@ _RATIO_CACHE: dict[tuple, dict] = {}
 
 
 def build(ticker: str, *, now: datetime, cal: TradingCalendar | None, market_open: bool,
-          index_body: bytes, trade_at=None, latest_trade=None, override_price: float | None = None,
-          override_basis: float | None = None, demo: bool = False) -> dict:
-    """The /api/futures payload. index_body: the Cboe payload of the index (shared cache with the map).
+          index_body: bytes | None = None, trade_at=None, latest_trade=None, override_price: float | None = None,
+          override_basis: float | None = None, demo: bool = False, payload: IndexPayload | None = None) -> dict:
+    """The /api/futures payload. index_body: the Cboe payload of the index (shared cache with the map), or
+    payload: an IndexPayload already built (alpaca_payload).
     trade_at / latest_trade: Alpaca REST callables, None without keys. Never raises for vendor trouble."""
     ticker = ticker.upper()
     index = config.ETF_INDEX.get(ticker, ticker)
@@ -343,7 +367,7 @@ def build(ticker: str, *, now: datetime, cal: TradingCalendar | None, market_ope
            "tolerance": spec["tolerance"], "label": ESTIMATE_LABEL, "warnings": [], "as_of": iso_z(now),
            "demo": demo}
     try:
-        p = cached_payload(index, index_body)
+        p = payload if payload is not None else cached_payload(index, index_body)
     except ValueError as e:
         out["reason"] = f"{index} payload unreadable: {e}"
         return out
@@ -400,6 +424,10 @@ def _override(index, etf, p: IndexPayload, ratio_known, price, market_open, trad
          "label": f"Cboe {index}, about 15 min delayed: your basis also holds any move since then"}
     if demo:
         o.update(index_source="demo", delayed=False, label="Synthetic fixture")
+    elif p.live:
+        o.update(index_source="alpaca_parity", delayed=False,
+                 label=f"Live {index} from its options (put-call parity)" if market_open
+                 else f"{index} from its closing option quotes: your basis also holds any move since the close")
     elif not market_open:
         o["label"] = f"Cboe {index} at the close: your basis also holds any move since the close"
     elif trade_at is not None and latest_trade is not None:

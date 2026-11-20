@@ -852,11 +852,29 @@ def futures_view(ticker: str, override_price: float | None = None, override_basi
                              demo=True)
     now = utc_now()
     cal = get_calendar(now)
-    body, _ = cboe.fetch_raw(index)
-    trade_at = latest = None
+    trade_at = latest = src = None
     if load_credentials() is not None:
         src = AlpacaSource(who="futures")
         trade_at, latest = src.trade_at, src.latest_trade
+    if index in config.ALPACA_INDEX:
+        # Since Cboe's block (2026-11-20): the map's live parity spot plus Alpaca quotes for the AM options that
+        # settle the futures contract. One snapshots request per refresh.
+        if src is None:
+            raise SourceError(f"The {index} Futures view needs Alpaca keys", status=503)
+        chain, _, _ = cached_chain(index)
+        c = futures.front_contract(index, ny_today(now))
+        S = chain.spot.price
+        lo, hi = S * (1 - config.FUTURES_STRIKE_BAND), S * (1 + config.FUTURES_STRIKE_BAND)
+        feed = chain.feed if chain.feed in ("opra", "indicative") else "indicative"
+        status, snaps = src._snapshots_one(config.FUTURES[index]["option_root"], feed,
+                                           c.expiry - timedelta(days=1), c.expiry, lo, hi)
+        if status != 200:
+            raise SourceError(f"{index} quarterly option quotes unavailable (HTTP {status})", status=status)
+        return futures.build(ticker, now=now, cal=cal, market_open=cal.market_open(now),
+                             payload=futures.alpaca_payload(index, chain.spot, snaps),
+                             trade_at=trade_at, latest_trade=latest, override_price=override_price,
+                             override_basis=override_basis)
+    body, _ = cboe.fetch_raw(index)
     return futures.build(ticker, now=now, cal=cal, market_open=cal.market_open(now), index_body=body,
                          trade_at=trade_at, latest_trade=latest, override_price=override_price,
                          override_basis=override_basis)
